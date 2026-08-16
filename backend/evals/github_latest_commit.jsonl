@@ -1,0 +1,8 @@
+{"id":"exact_name","query":"What was the last commit by Raghav Sharma on Project X?","expected_status":"found","expected_identity":"raghav sharma","expected_citations":1}
+{"id":"github_login","query":"What was the last commit by raghav-dev on Project X?","expected_status":"found","expected_identity":"raghav-dev","expected_citations":1}
+{"id":"author_email","query":"What was the last commit by raghav@example.com on Project X?","expected_status":"found","expected_identity":"raghav@example.com","expected_citations":1}
+{"id":"unique_partial","query":"What was the last commit by Raghav on Project X?","expected_status":"found","expected_identity":"raghav sharma","expected_citations":1}
+{"id":"ambiguous_partial","query":"What was the last commit by Alex on Project X?","expected_status":"ambiguous","expected_citations":0}
+{"id":"missing_author","query":"What was the latest commit on Project X?","expected_status":"missing_author","expected_citations":0}
+{"id":"unknown_author","query":"What was the last commit by Nobody on Project X?","expected_status":"not_found","expected_citations":0}
+{"id":"stale_sync","query":"What was the last commit by Raghav on Project X?","expected_status":"found_stale","expected_grade":"ambiguous","expected_citations":1}

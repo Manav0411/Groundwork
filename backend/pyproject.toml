@@ -1,0 +1,49 @@
+[project]
+name = "engineering-project-intel-agent"
+version = "0.1.0"
+description = "Self-hosted Agentic RAG service for engineering project intelligence"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+  "fastapi>=0.116.0",
+  "uvicorn[standard]>=0.35.0",
+  "pydantic>=2.11.0",
+  "pydantic-settings>=2.10.0",
+  "python-dotenv>=1.1.0",
+  "sqlalchemy[asyncio]>=2.0.0",
+  "alembic>=1.16.0",
+  "asyncpg>=0.30.0",
+  "pgvector>=0.4.0",
+  "httpx>=0.28.0",
+  "tenacity>=9.1.0",
+  "langgraph>=0.6.0",
+  "langchain-core>=0.3.0",
+  "langchain-community>=0.3.0",
+  "ollama>=0.5.0",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.4.0",
+  "pytest-asyncio>=1.1.0",
+  "respx>=0.22.0",
+  "ruff>=0.12.0",
+]
+eval = [
+  "deepeval>=4.1.0,<5.0.0",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+exclude = ["alembic/versions"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+addopts = ["-p", "no:rerunfailures", "-p", "no:deepeval"]
+
+[tool.setuptools.packages.find]
+include = ["app*", "evals*"]
