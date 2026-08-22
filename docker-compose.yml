@@ -1,24 +1,26 @@
+name: groundwork
+
 services:
   postgres:
     image: pgvector/pgvector:pg16
-    container_name: agentic-rag-postgres
+    container_name: groundwork-postgres
     environment:
-      POSTGRES_USER: agentic_rag
-      POSTGRES_PASSWORD: agentic_rag
-      POSTGRES_DB: agentic_rag
+      POSTGRES_USER: groundwork
+      POSTGRES_PASSWORD: groundwork
+      POSTGRES_DB: groundwork
     ports:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U agentic_rag -d agentic_rag"]
+      test: ["CMD-SHELL", "pg_isready -U groundwork -d groundwork"]
       interval: 10s
       timeout: 5s
       retries: 5
 
   ollama:
     image: ollama/ollama:latest
-    container_name: agentic-rag-ollama
+    container_name: groundwork-ollama
     ports:
       - "11434:11434"
     volumes:
@@ -27,11 +29,11 @@ services:
   backend:
     build:
       context: ./backend
-    container_name: agentic-rag-backend
+    container_name: groundwork-backend
     env_file:
       - .env
     environment:
-      DATABASE_URL: postgresql+asyncpg://agentic_rag:agentic_rag@postgres:5432/agentic_rag
+      DATABASE_URL: postgresql+asyncpg://groundwork:groundwork@postgres:5432/groundwork
       OLLAMA_BASE_URL: http://ollama:11434
     ports:
       - "8000:8000"
@@ -44,7 +46,7 @@ services:
   frontend:
     build:
       context: ./frontend
-    container_name: agentic-rag-frontend
+    container_name: groundwork-frontend
     env_file:
       - .env
     ports:
@@ -54,4 +56,6 @@ services:
 
 volumes:
   postgres_data:
+    name: groundwork_postgres_data
   ollama_data:
+    name: groundwork_ollama_data

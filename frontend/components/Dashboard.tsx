@@ -362,7 +362,7 @@ export function Dashboard() {
         <div className="flex items-center gap-3">
           <div className="rounded-lg bg-blue-500/15 p-2"><Code2 className="h-5 w-5 text-blue-300" /></div>
           <div>
-            <h1 className="text-lg font-semibold tracking-tight">Project Intel Agent</h1>
+            <h1 className="text-lg font-semibold tracking-tight">Groundwork</h1>
             <p className="text-xs text-slate-400">Engineering knowledge, with evidence</p>
           </div>
         </div>

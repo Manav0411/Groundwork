@@ -1,7 +1,7 @@
 [project]
-name = "engineering-project-intel-agent"
+name = "groundwork"
 version = "0.1.0"
-description = "Self-hosted Agentic RAG service for engineering project intelligence"
+description = "Engineering project intelligence with cited evidence"
 requires-python = ">=3.12,<3.13"
 dependencies = [
   "fastapi>=0.116.0",

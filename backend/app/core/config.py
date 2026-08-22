@@ -9,7 +9,7 @@ class Settings(BaseSettings):
 
     app_api_key: str = Field(default="change-me", alias="APP_API_KEY")
     database_url: str = Field(
-        default="postgresql+asyncpg://agentic_rag:agentic_rag@localhost:5432/agentic_rag",
+        default="postgresql+asyncpg://groundwork:groundwork@localhost:5432/groundwork",
         alias="DATABASE_URL",
     )
     database_pool_size: int = Field(default=5, alias="DATABASE_POOL_SIZE")

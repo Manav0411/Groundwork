@@ -31,7 +31,7 @@ jobs:
         # Catches a revision that cannot be rendered without a live database.
         run: python -m alembic upgrade head --sql
         env:
-          DATABASE_URL: postgresql+asyncpg://agentic_rag:agentic_rag@localhost:5432/agentic_rag
+          DATABASE_URL: postgresql+asyncpg://groundwork:groundwork@localhost:5432/groundwork
 
   schema:
     name: Schema integration
@@ -43,18 +43,18 @@ jobs:
       postgres:
         image: pgvector/pgvector:pg16
         env:
-          POSTGRES_USER: agentic_rag
-          POSTGRES_PASSWORD: agentic_rag
-          POSTGRES_DB: agentic_rag
+          POSTGRES_USER: groundwork
+          POSTGRES_PASSWORD: groundwork
+          POSTGRES_DB: groundwork
         ports:
           - 5432:5432
         options: >-
-          --health-cmd "pg_isready -U agentic_rag -d agentic_rag"
+          --health-cmd "pg_isready -U groundwork -d groundwork"
           --health-interval 10s
           --health-timeout 5s
           --health-retries 5
     env:
-      DATABASE_URL: postgresql+asyncpg://agentic_rag:agentic_rag@localhost:5432/agentic_rag
+      DATABASE_URL: postgresql+asyncpg://groundwork:groundwork@localhost:5432/groundwork
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5

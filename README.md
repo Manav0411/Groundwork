@@ -1,6 +1,6 @@
-# Engineering Project Intelligence Agent
+# Groundwork
 
-A self-hosted Agent-as-a-Service product for engineering project intelligence.
+Engineering knowledge, with evidence. A self-hosted agent that answers questions about your engineering projects from GitHub and Jira, and cites every claim.
 
 The system answers questions like:
 
@@ -64,8 +64,8 @@ docker compose run --rm --no-deps backend alembic upgrade head
 Pull local models:
 
 ```bash
-docker exec -it agentic-rag-ollama ollama pull qwen3:8b
-docker exec -it agentic-rag-ollama ollama pull embeddinggemma
+docker exec -it groundwork-ollama ollama pull qwen3:8b
+docker exec -it groundwork-ollama ollama pull embeddinggemma
 ```
 
 Verify the configured Ollama model:
