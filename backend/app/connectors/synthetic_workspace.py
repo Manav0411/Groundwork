@@ -1,8 +1,15 @@
+"""Synthetic development workspace.
+
+This is demo fixture data for the two `project-atlas` / `project-orion` sample projects only.
+`get_weekly_brief_evidence` previously ignored its `project_id` argument and returned this fiction
+for *any* project, so a real repository whose retrieval missed received fabricated Project Atlas
+evidence presented as cited fact. Every accessor is now scoped to `SYNTHETIC_PROJECT_IDS`.
+"""
+
 from app.models.schemas import (
     Citation,
     EvidenceItem,
     ProjectSummary,
-    TimelineItem,
 )
 
 PROJECTS = [
@@ -23,11 +30,21 @@ PROJECTS = [
 ]
 
 
+SYNTHETIC_PROJECT_IDS = frozenset(project.id for project in PROJECTS)
+
+
 def get_projects() -> list[ProjectSummary]:
     return PROJECTS
 
 
+def is_synthetic_project(project_id: str) -> bool:
+    return project_id in SYNTHETIC_PROJECT_IDS
+
+
 def get_weekly_brief_evidence(project_id: str) -> tuple[list[EvidenceItem], list[Citation]]:
+    """Demo evidence for the sample projects. Returns nothing for a real project."""
+    if not is_synthetic_project(project_id):
+        return [], []
     citations = [
         Citation(id=1, source_type="jira", title="ATLAS-42 Payment gateway instability"),
         Citation(id=2, source_type="jira", title="ATLAS-47 Data backfill job failing"),
@@ -78,29 +95,3 @@ def get_weekly_brief_evidence(project_id: str) -> tuple[list[EvidenceItem], list
         ),
     ]
     return evidence, citations
-
-
-def get_timeline(project_id: str) -> list[TimelineItem]:
-    return [
-        TimelineItem(
-            id="tl-1",
-            timestamp="2026-08-09T09:00:00Z",
-            source_type="github",
-            title="Commit batch synced",
-            summary="Recent backend commits indexed for Project Atlas.",
-        ),
-        TimelineItem(
-            id="tl-2",
-            timestamp="2026-08-08T15:30:00Z",
-            source_type="jira",
-            title="Payment gateway blocker updated",
-            summary="Owner confirmed external sandbox instability remains unresolved.",
-        ),
-        TimelineItem(
-            id="tl-3",
-            timestamp="2026-08-07T11:10:00Z",
-            source_type="docs",
-            title="Sprint 24 plan updated",
-            summary="Scope reduced to protect payment integration milestone.",
-        ),
-    ]

@@ -26,10 +26,14 @@ htmlcov/
 coverage.xml
 backend/evals/reports/
 
-# Local project notes and visual artifacts
+# Local working notes and visual artifacts
 /docs/
 /Agentic_RAG_Project_Ideation.md
 /agentic rag.png
+
+# Local assistant tooling and configuration
+/CLAUDE.md
+/.claude/
 
 # Node.js / Next.js
 node_modules/

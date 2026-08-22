@@ -9,9 +9,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.agent.graph import run_agent
 from app.connectors.github import GitHubRateLimitError
 from app.connectors.jira import JiraRateLimitError
-from app.connectors.synthetic_workspace import get_timeline
 from app.core.security import require_api_key
-from app.db.models import ConnectorSyncState, Project
+from app.db.models import ConnectorSyncState, Project, SourceDocument
 from app.db.session import get_optional_session, get_session
 from app.models.schemas import (
     JiraProjectConfig,
@@ -264,8 +263,38 @@ async def jira_sync_status(project_id: str, session: DatabaseSession) -> dict[st
     response_model=list[TimelineItem],
     dependencies=[Depends(require_api_key)],
 )
-async def project_timeline(project_id: str) -> list[TimelineItem]:
-    return get_timeline(project_id)
+async def project_timeline(
+    project_id: str,
+    session: DatabaseSession,
+    limit: int = 20,
+) -> list[TimelineItem]:
+    """Recent indexed activity for a project, drawn from synchronized source documents."""
+    if await session.get(Project, project_id) is None:
+        raise HTTPException(status_code=404, detail=f"Project {project_id!r} does not exist.")
+    documents = list(
+        (
+            await session.scalars(
+                select(SourceDocument)
+                .where(SourceDocument.project_id == project_id)
+                .order_by(
+                    SourceDocument.source_created_at.desc().nullslast(),
+                    SourceDocument.id.desc(),
+                )
+                .limit(max(1, min(limit, 100)))
+            )
+        ).all()
+    )
+    return [
+        TimelineItem(
+            id=f"doc-{document.id}",
+            # Fall back to ingestion time so an item without provider metadata still sorts.
+            timestamp=(document.source_created_at or document.created_at).isoformat(),
+            source_type=document.source_type,
+            title=document.title,
+            summary=document.content[:280],
+        )
+        for document in documents
+    ]
 
 
 @router.get("/conversations/{conversation_id}/trace", dependencies=[Depends(require_api_key)])
