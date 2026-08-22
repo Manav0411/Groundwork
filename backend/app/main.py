@@ -7,9 +7,9 @@ from app.core.config import settings
 
 def create_app() -> FastAPI:
     app = FastAPI(
-        title="Engineering Project Intelligence Agent",
+        title="Groundwork",
         version="0.1.0",
-        description="Self-hosted Agentic RAG service for engineering project intelligence.",
+        description="Engineering project intelligence with cited evidence.",
     )
     app.add_middleware(
         CORSMiddleware,

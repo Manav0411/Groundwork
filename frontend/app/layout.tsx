@@ -2,8 +2,8 @@ import "./globals.css";
 import type { Metadata } from "next";
 
 export const metadata: Metadata = {
-  title: "AskBase — Project Intel Agent",
-  description: "Engineering Project Intelligence Agent-as-a-Service"
+  title: "Groundwork",
+  description: "Engineering knowledge, with evidence"
 };
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {

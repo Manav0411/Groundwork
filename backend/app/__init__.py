@@ -1,1 +1,1 @@
-"""Engineering Project Intelligence Agent backend."""
+"""Groundwork backend."""

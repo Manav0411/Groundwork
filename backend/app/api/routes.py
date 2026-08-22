@@ -33,7 +33,7 @@ OptionalDatabaseSession = Annotated[AsyncSession | None, Depends(get_optional_se
 
 @router.get("/health")
 async def health() -> dict[str, str]:
-    return {"status": "ok", "service": "engineering-project-intel-agent"}
+    return {"status": "ok", "service": "groundwork"}
 
 
 @router.get("/health/ollama")
