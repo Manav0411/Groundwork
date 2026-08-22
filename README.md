@@ -15,14 +15,30 @@ The project is free-first: Ollama/local open models are the default, PostgreSQL 
 
 ## Current implementation
 
-- `backend/` — FastAPI + LangGraph-ready backend
+- `backend/` — FastAPI backend with a deterministic intent router
 - `frontend/` — Next.js demo UI
 - `docker-compose.yml` — Postgres, Ollama, backend, frontend
-- `docs/` — scope, architecture, tradeoffs, build journey, evaluation, standardization, deployment
 
-The backend now persists projects, source documents, chunks, conversations, query runs,
-citations, retrieved evidence, and agent traces. Retrieval combines PostgreSQL full-text search
-with pgvector cosine similarity and falls back to full-text search when embeddings are offline.
+The backend persists projects, source documents, chunks, conversations, query runs, citations,
+retrieved evidence, and agent traces. Retrieval combines PostgreSQL full-text search with pgvector
+cosine similarity and falls back to full-text search when embeddings are offline. Exact questions
+("latest commit by X", "status of ASK-6") bypass semantic retrieval entirely and are answered by
+typed SQL, so embedding similarity never decides factual ordering.
+
+**Current limitations, stated plainly:** the connectors, persistence, exact-answer SQL paths,
+citation validation, and evaluation gates are complete. Query routing is a deterministic intent
+router rather than a planner-driven graph. Retrieval grading is derived from what retrieval
+returned; there is no corrective retrieval loop yet. The hybrid retriever's lexical leg
+under-contributes because its candidate filter is too permissive, so summary-style questions are
+weaker than the exact-answer paths.
+
+### Answer integrity
+
+- No evidence, no answer. A question that retrieves nothing returns zero citations, a grade of
+  `incorrect`, and an explicit unresolved gap — never a plausible-sounding guess.
+- Every `[n]` citation marker is checked against the citations actually emitted. An unresolved
+  marker is stripped, the grade downgraded, and the discrepancy disclosed.
+- Agent trace durations are measured, not estimated.
 
 ## Local setup
 
@@ -177,15 +193,3 @@ All non-health endpoints require:
 ```http
 X-API-Key: change-me
 ```
-
-## Documentation
-
-Start with:
-
-- [Project scope](docs/PROJECT_SCOPE.md)
-- [Architecture](docs/ARCHITECTURE.md)
-- [Tradeoffs](docs/TRADEOFFS.md)
-- [Build journey](docs/BUILD_JOURNEY.md)
-- [Evaluation](docs/EVALUATION.md)
-- [Standardization](docs/STANDARDIZATION.md)
-- [Deployment](docs/DEPLOYMENT.md)

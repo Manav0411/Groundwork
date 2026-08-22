@@ -48,7 +48,8 @@ class Settings(BaseSettings):
     jira_sync_running_timeout_minutes: int = Field(
         default=15, alias="JIRA_SYNC_RUNNING_TIMEOUT_MINUTES"
     )
-    tavily_api_key: str | None = Field(default=None, alias="TAVILY_API_KEY")
+    # A Tavily web-search fallback is part of the Phase 2 corrective-retrieval loop. The setting
+    # is intentionally absent until code uses it.
 
     backend_cors_origins: str = Field(default="http://localhost:3000", alias="BACKEND_CORS_ORIGINS")
 

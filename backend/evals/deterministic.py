@@ -7,6 +7,11 @@ from evals.models import CheckResult, EvaluationCase
 GITHUB_COMMIT_PATH = re.compile(r"^/[^/]+/[^/]+/commit/([0-9a-f]{40})$")
 JIRA_ISSUE_PATH = re.compile(r"^/browse/([A-Z][A-Z0-9_]*-[0-9]+)$")
 
+# The trace once reported these literals as if they were measurements. Durations are now taken
+# with `perf_counter`, so a genuinely sub-millisecond deterministic step reporting 0 is correct
+# and expected; what must never reappear is the fabricated sequence.
+FABRICATED_TRACE_DURATIONS = frozenset({42, 118, 430, 86, 55})
+
 
 def _check(name: str, passed: bool, detail: str) -> CheckResult:
     return CheckResult(name=name, passed=passed, detail=detail)
@@ -69,6 +74,11 @@ def evaluate_response(
             "latency_budget",
             duration_ms <= case.max_latency_ms,
             f"budget {case.max_latency_ms}ms; got {duration_ms}ms",
+        ),
+        _check(
+            "trace_durations_measured",
+            not FABRICATED_TRACE_DURATIONS.issubset({step.duration_ms for step in response.trace}),
+            "trace durations must be measured, not the legacy hardcoded literals",
         ),
     ]
 

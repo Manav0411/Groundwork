@@ -56,6 +56,45 @@ function formatDate(value?: string | null) {
   }).format(new Date(value));
 }
 
+const GRADE_STYLES: Record<QueryResponse["retrieval_grade"], string> = {
+  correct: "bg-emerald-100 text-emerald-700",
+  ambiguous: "bg-amber-100 text-amber-800",
+  incorrect: "bg-red-100 text-red-700"
+};
+
+/** Report what the trace actually shows, rather than a fixed success message. */
+function describeTrace(answer: QueryResponse) {
+  const failed = answer.trace.filter((step) => step.status === "failed");
+  if (failed.length) {
+    return {
+      className: "border-red-200 bg-red-50 text-red-800",
+      message: `${failed.length} step(s) failed: ${failed.map((step) => step.name).join(", ")}.`
+    };
+  }
+  if (answer.retrieval_grade === "incorrect") {
+    return {
+      className: "border-red-200 bg-red-50 text-red-800",
+      message: "No evidence supported an answer. Nothing was generated and the gap is disclosed above."
+    };
+  }
+  if (answer.unresolved_gaps.length) {
+    return {
+      className: "border-amber-200 bg-amber-50 text-amber-900",
+      message: `Trace completed with ${answer.unresolved_gaps.length} unresolved gap(s).`
+    };
+  }
+  if (!answer.citations.length) {
+    return {
+      className: "border-slate-200 bg-slate-50 text-slate-700",
+      message: "Trace completed. No citation was required for this answer."
+    };
+  }
+  return {
+    className: "border-emerald-200 bg-emerald-50 text-emerald-800",
+    message: `Trace completed. Every material claim maps to one of ${answer.citations.length} validated citation(s).`
+  };
+}
+
 function projectIdFromName(name: string) {
   return name
     .toLowerCase()
@@ -159,6 +198,7 @@ export function Dashboard() {
   const selectedProject = projects.find((project) => project.id === selectedId) ?? null;
   const selectedSync = selectedId ? syncStatuses[selectedId] : undefined;
   const selectedJiraSync = selectedId ? jiraStatuses[selectedId] : undefined;
+  const traceVerdict = describeTrace(answer);
 
   useEffect(() => {
     let active = true;
@@ -494,7 +534,7 @@ export function Dashboard() {
 
           <article className="rounded-2xl border border-line bg-panel shadow-panel">
             <div className="flex items-center justify-between border-b border-line px-5 py-4">
-              <div className="flex items-center gap-3"><h3 className="font-semibold text-slate-950">Answer</h3><span className="rounded-full bg-emerald-100 px-2.5 py-1 text-xs font-medium text-emerald-700">{answer.retrieval_grade}</span></div>
+              <div className="flex items-center gap-3"><h3 className="font-semibold text-slate-950">Answer</h3><span className={`rounded-full px-2.5 py-1 text-xs font-medium ${GRADE_STYLES[answer.retrieval_grade] ?? "bg-slate-100 text-slate-700"}`}>{answer.retrieval_grade}</span></div>
               <button className="secondary-button" onClick={copyAnswer} type="button"><Copy className="h-4 w-4" />Copy</button>
             </div>
             <div className="space-y-5 p-5 text-sm leading-6 text-slate-700">
@@ -502,14 +542,20 @@ export function Dashboard() {
               {answer.citations.length ? (
                 <div><h4 className="mb-2 font-semibold text-slate-950">Citations</h4><div className="flex flex-wrap gap-2">{answer.citations.map((citation) => citation.url ? <a className="rounded-lg border border-blue-100 bg-blue-50 px-2.5 py-1 text-xs text-blue-700 hover:border-blue-300" href={citation.url} key={citation.id} rel="noreferrer" target="_blank">[{citation.id}] {citation.title}</a> : <span className="rounded-lg border border-blue-100 bg-blue-50 px-2.5 py-1 text-xs text-blue-700" key={citation.id}>[{citation.id}] {citation.title}</span>)}</div></div>
               ) : null}
+              {answer.unresolved_gaps.length ? (
+                <div className="rounded-xl border border-amber-200 bg-amber-50 p-4">
+                  <h4 className="mb-2 flex items-center gap-2 font-semibold text-amber-900"><AlertCircle className="h-4 w-4" />Unresolved gaps</h4>
+                  <ul className="list-disc space-y-1 pl-5 text-xs text-amber-900">{answer.unresolved_gaps.map((gap) => <li key={gap}>{gap}</li>)}</ul>
+                </div>
+              ) : null}
             </div>
           </article>
         </section>
 
         <aside className="border-t border-line bg-white p-5 xl:border-l xl:border-t-0">
           <div className="mb-5 flex items-center justify-between"><div><p className="section-label text-slate-500">Observability</p><h3 className="mt-1 font-semibold text-slate-950">Agent trace</h3></div><ShieldCheck className="h-5 w-5 text-emerald-500" /></div>
-          {answer.trace.length ? <div className="space-y-4">{answer.trace.map((step) => <div className="rounded-xl border border-line bg-white p-4 shadow-sm" key={step.name}><div className="mb-2 flex items-center justify-between"><div className="flex items-center gap-2"><CheckCircle2 className="h-4 w-4 text-emerald-500" /><span className="font-medium text-slate-900">{step.name}</span></div><span className="text-xs text-slate-500">{step.duration_ms}ms</span></div><p className="text-sm leading-5 text-slate-600">{step.summary}</p></div>)}</div> : <div className="rounded-xl border border-dashed border-line p-6 text-center"><Database className="mx-auto h-6 w-6 text-slate-400" /><p className="mt-2 text-sm text-slate-600">Run a question to inspect planning, retrieval, and citation validation.</p></div>}
-          {answer.trace.length ? <div className="mt-5 rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-800">Trace completed successfully. Material claims are backed by citations.</div> : null}
+          {answer.trace.length ? <div className="space-y-4">{answer.trace.map((step) => <div className="rounded-xl border border-line bg-white p-4 shadow-sm" key={step.name}><div className="mb-2 flex items-center justify-between"><div className="flex items-center gap-2">{step.status === "failed" ? <AlertCircle className="h-4 w-4 text-red-500" /> : <CheckCircle2 className="h-4 w-4 text-emerald-500" />}<span className="font-medium text-slate-900">{step.name}</span></div><span className="text-xs text-slate-500">{step.duration_ms}ms</span></div><p className="text-sm leading-5 text-slate-600">{step.summary}</p></div>)}</div> : <div className="rounded-xl border border-dashed border-line p-6 text-center"><Database className="mx-auto h-6 w-6 text-slate-400" /><p className="mt-2 text-sm text-slate-600">Run a question to inspect planning, retrieval, and citation validation.</p></div>}
+          {answer.trace.length ? <div className={`mt-5 rounded-xl border p-4 text-sm ${traceVerdict.className}`}>{traceVerdict.message}</div> : null}
         </aside>
       </div>
     </main>

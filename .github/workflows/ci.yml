@@ -1,0 +1,90 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+env:
+  PYTHON_VERSION: "3.12"
+
+jobs:
+  backend:
+    name: Backend lint and unit tests
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+      - name: Install
+        run: pip install -e ".[dev]"
+      - name: Lint
+        run: ruff check .
+      - name: Unit tests
+        run: python -m pytest
+      - name: Migration scripts are generatable offline
+        # Catches a revision that cannot be rendered without a live database.
+        run: python -m alembic upgrade head --sql
+        env:
+          DATABASE_URL: postgresql+asyncpg://agentic_rag:agentic_rag@localhost:5432/agentic_rag
+
+  schema:
+    name: Schema integration
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: agentic_rag
+          POSTGRES_PASSWORD: agentic_rag
+          POSTGRES_DB: agentic_rag
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U agentic_rag -d agentic_rag"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      DATABASE_URL: postgresql+asyncpg://agentic_rag:agentic_rag@localhost:5432/agentic_rag
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+      - name: Install
+        run: pip install -e ".[dev]"
+      - name: Apply migrations
+        run: python -m alembic upgrade head
+      - name: Models match migrations (no schema drift)
+        run: python -m alembic check
+
+  frontend:
+    name: Frontend lint and build
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run build
+
+# The live evaluation gates (evals/askbase.jsonl, evals/jira_askbase.jsonl) are deliberately not
+# run here: they need real GitHub/Jira credentials and a running Ollama. They stay a local
+# release gate.
