@@ -28,9 +28,10 @@ typed SQL, so embedding similarity never decides factual ordering.
 **Current limitations, stated plainly:** the connectors, persistence, exact-answer SQL paths,
 citation validation, and evaluation gates are complete. Query routing is a deterministic intent
 router rather than a planner-driven graph. Retrieval grading is derived from what retrieval
-returned; there is no corrective retrieval loop yet. The hybrid retriever's lexical leg
-under-contributes because its candidate filter is too permissive, so summary-style questions are
-weaker than the exact-answer paths.
+returned; there is no corrective retrieval loop yet, so the agent can report that evidence is thin
+but cannot act on it. Retrieval quality is measured against a labelled set
+(`backend/evals/baselines/`); the open gap there is that the retriever cannot yet recognise a
+question its corpus has no answer to, and returns its nearest matches regardless.
 
 ### Answer integrity
 
@@ -140,6 +141,13 @@ cd backend
   --dataset evals/askbase.jsonl \
   --sync-before \
   --fail-under 1.0
+```
+
+Measure retrieval quality against the labelled set (run inside the container — a host
+PostgreSQL often owns `localhost:5432` and shadows the published port):
+
+```bash
+docker compose run --rm --no-deps backend python -m evals.retrieval_runner
 ```
 
 Run the live Jira gate with the same runner:
