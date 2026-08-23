@@ -44,15 +44,23 @@ class TavilyConnector:
         if not self.enabled:
             raise TavilyError("Tavily is not configured; set TAVILY_API_KEY to enable it.")
         payload = {
-            "api_key": self.api_key,
             "query": query,
             "max_results": max(1, min(max_results or settings.tavily_max_results, 10)),
             "search_depth": "basic",
         }
+        # The key goes in the Authorization header. Passing it as an `api_key` body field is the
+        # older interface and is now treated as unauthenticated, which surfaces as a 432 rather
+        # than a 401.
+        headers = {"Authorization": f"Bearer {self.api_key}"}
         async with httpx.AsyncClient(timeout=self.timeout_seconds) as client:
-            response = await client.post(TAVILY_SEARCH_URL, json=payload)
+            response = await client.post(TAVILY_SEARCH_URL, json=payload, headers=headers)
             if response.status_code == 429:
                 raise TavilyError("Tavily rate limit exceeded.")
+            if response.status_code == 432:
+                raise TavilyError(
+                    "Tavily rejected the request as exceeding the plan's usage limit (432); "
+                    "check that TAVILY_API_KEY is valid and has remaining credits."
+                )
             response.raise_for_status()
             data = response.json()
 
