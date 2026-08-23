@@ -8,10 +8,12 @@ from app.connectors.synthetic_workspace import (
     get_weekly_brief_evidence,
     is_synthetic_project,
 )
+from app.connectors.tavily import TavilyConnector, WebResult, web_results_to_response
 from app.core.config import settings
 from app.db.models import Project
 from app.models.schemas import Citation, EvidenceItem, QueryRequest, QueryResponse, RetrievalGrade
 from app.services.citations import validate_citations
+from app.services.grading import GradeResult, grade_retrieval, rewrite_query
 from app.services.ingestion import upsert_project
 from app.services.llm import (
     OllamaClient,
@@ -39,6 +41,10 @@ NO_EVIDENCE_GAP = (
 )
 SYNTHETIC_DEMO_GAP = (
     "This answer uses the built-in synthetic demo workspace, not synchronized project data."
+)
+WEB_SOURCED_GAP = (
+    "No indexed project evidence supported this question, so the answer comes from public web "
+    "search rather than from this organization's own records."
 )
 
 
@@ -336,6 +342,10 @@ async def run_agent(request: QueryRequest, session: AsyncSession | None = None) 
             f"Classified query as {query_type}; selected hybrid full-text/vector retrieval."
         )
 
+    grade_result: GradeResult | None = None
+    corrective_notes: list[str] = []
+    web_results: list[WebResult] = []
+
     with trace.step("Hybrid Retriever") as step:
         if session is not None and project_exists:
             records = await hybrid_retrieve(
@@ -344,53 +354,102 @@ async def run_agent(request: QueryRequest, session: AsyncSession | None = None) 
                 query=request.query,
                 ollama=OllamaClient(),
             )
-        evidence: list[EvidenceItem]
-        citations: list[Citation]
-        if records:
-            evidence, citations = records_to_response(records)
-            step.summary = (
-                f"Retrieved {len(records)} persisted chunks with hybrid full-text/vector search."
-            )
-        elif is_synthetic_project(request.project_id):
-            evidence, citations = get_weekly_brief_evidence(request.project_id)
-            step.summary = (
-                "No persisted matches found; used the synthetic development workspace."
-            )
-        else:
-            evidence, citations = [], []
-            step.summary = "No persisted chunks matched this question."
+        step.summary = (
+            f"Retrieved {len(records)} persisted chunk(s) with hybrid full-text/vector search."
+            if records
+            else "No persisted chunks matched this question."
+        )
 
-    # A deterministic grade derived from what retrieval actually returned. Phase 2 replaces this
-    # with a real grader plus a corrective loop; until then the grade is never asserted, only
-    # derived, and it is never reported as `correct` without supporting evidence.
-    with trace.step("Retrieval Grader") as step:
-        if records:
-            retrieval_grade: RetrievalGrade = "correct"
-            # Report how the evidence was actually matched. `hybrid_retrieve` admits every embedded
-            # chunk as a candidate and its tsquery ANDs all question terms, so today this is
-            # usually 0 — the lexical leg rarely fires. Surfacing the count keeps that visible
-            # instead of implied. Phase 4 replaces the ranking; Phase 2 acts on the grade.
-            lexical_hits = sum(1 for record in records if record.lexical_score > 0)
-            step.summary = (
-                f"Graded {len(records)} retrieved chunk(s) as supporting evidence "
-                f"({lexical_hits} matched the question's terms lexically, "
-                f"{len(records) - lexical_hits} by vector proximity only)."
-            )
-        elif citations:
-            retrieval_grade = "ambiguous"
+    evidence: list[EvidenceItem]
+    citations: list[Citation]
+
+    if not records and is_synthetic_project(request.project_id):
+        # The demo workspace is fixture data, not retrieved evidence, so there is nothing to grade.
+        with trace.step("Retrieval Grader") as step:
+            evidence, citations = get_weekly_brief_evidence(request.project_id)
+            retrieval_grade: RetrievalGrade = "ambiguous"
             unresolved_gaps.append(SYNTHETIC_DEMO_GAP)
             step.summary = (
                 "Only synthetic demo evidence was available; graded ambiguous and disclosed it."
             )
-        else:
-            retrieval_grade = "incorrect"
-            unresolved_gaps.append(NO_EVIDENCE_GAP)
-            step.summary = "No evidence was retrieved; graded incorrect and disclosed the gap."
+        tools_used = ["planner", "synthetic_workspace", "retrieval_grader"]
+    else:
+        with trace.step("Retrieval Grader") as step:
+            grade_result = await grade_retrieval(request.query, records, ollama=OllamaClient())
+            step.summary = grade_result.summary
 
-    tools_used = ["planner", "postgres_fts", "pgvector"] if records else ["planner"]
-    if citations and not records:
-        tools_used.append("synthetic_workspace")
-    tools_used.append("retrieval_grader")
+        # Corrective retrieval. Each attempt re-retrieves and re-grades; the grade is capped at
+        # `ambiguous` once correction was needed, because the answer is not supported by what the
+        # first retrieval returned.
+        attempt = 0
+        while (
+            not grade_result.is_sufficient
+            and session is not None
+            and project_exists
+            and attempt < settings.corrective_max_attempts
+        ):
+            attempt += 1
+            with trace.step(f"Corrective Retrieval {attempt}") as step:
+                if attempt == 1:
+                    rewritten = await rewrite_query(request.query, OllamaClient())
+                    search_query = rewritten or request.query
+                    action = (
+                        f"rewrote the question as {rewritten!r}"
+                        if rewritten
+                        else "could not rewrite the question; retried unchanged"
+                    )
+                    limit = 8
+                else:
+                    search_query = request.query
+                    action = "widened the candidate pool"
+                    limit = 16
+                records = await hybrid_retrieve(
+                    session,
+                    project_id=request.project_id,
+                    query=search_query,
+                    limit=limit,
+                    ollama=OllamaClient(),
+                )
+                grade_result = await grade_retrieval(
+                    request.query, records, ollama=OllamaClient(), corrected=True
+                )
+                corrective_notes.append(action)
+                step.summary = f"Attempt {attempt}: {action}. {grade_result.summary}"
+
+        # Last resort: the corpus genuinely does not contain the answer. Search the web, but never
+        # let a web-sourced answer be graded `correct`.
+        connector = TavilyConnector()
+        if not grade_result.is_sufficient and connector.enabled:
+            with trace.step("Web Fallback") as step:
+                try:
+                    web_results = await connector.search(request.query)
+                    step.summary = (
+                        f"Project sources were insufficient; retrieved {len(web_results)} "
+                        "web result(s)."
+                    )
+                except Exception as exc:
+                    step.fail(f"Web search failed: {exc}")
+
+        if web_results:
+            evidence, citations = web_results_to_response(web_results)
+            records = []
+            retrieval_grade = "ambiguous"
+            unresolved_gaps.append(WEB_SOURCED_GAP)
+        else:
+            records = grade_result.kept
+            evidence, citations = records_to_response(records)
+            retrieval_grade = grade_result.grade
+            if not records:
+                unresolved_gaps.append(NO_EVIDENCE_GAP)
+
+        tools_used = ["planner"]
+        if session is not None and project_exists:
+            tools_used += ["postgres_fts", "pgvector"]
+        tools_used.append("retrieval_grader")
+        if corrective_notes:
+            tools_used.append("corrective_retrieval")
+        if web_results:
+            tools_used.append("web_search")
 
     evidence_lines = [
         f"[{item.citation_id}] {item.source_type}: {item.title} — {item.snippet}"

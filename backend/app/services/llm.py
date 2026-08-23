@@ -1,3 +1,4 @@
+import json
 from dataclasses import dataclass
 
 import httpx
@@ -59,6 +60,46 @@ class OllamaClient:
             payload = response.json()
 
         return sorted(model["name"] for model in payload.get("models", []))
+
+    async def generate_json(
+        self,
+        system_prompt: str,
+        user_prompt: str,
+        *,
+        model: str | None = None,
+        timeout_seconds: float | None = None,
+    ) -> dict:
+        """Generate with Ollama's JSON mode, which constrains decoding to valid JSON.
+
+        Without `format: "json"` a 1B model returns prose around its JSON often enough to be
+        unusable as a grader. With it, parsing failure means a genuinely broken response rather
+        than the model being chatty, so the caller's fallback stays a real signal.
+        """
+        payload = {
+            "model": model or self.model,
+            "stream": False,
+            "format": "json",
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ],
+            "options": {"temperature": 0.0},
+        }
+        async with httpx.AsyncClient(timeout=timeout_seconds or self.timeout_seconds) as client:
+            response = await client.post(f"{self.base_url}/api/chat", json=payload)
+            response.raise_for_status()
+            data = response.json()
+
+        content = data.get("message", {}).get("content", "").strip()
+        if not content:
+            raise LLMProviderError("Ollama returned an empty response.")
+        try:
+            parsed = json.loads(content)
+        except json.JSONDecodeError as exc:
+            raise LLMProviderError(f"Ollama returned invalid JSON: {content[:200]}") from exc
+        if not isinstance(parsed, dict):
+            raise LLMProviderError("Expected a JSON object at the top level.")
+        return parsed
 
     async def generate(self, system_prompt: str, user_prompt: str) -> str:
         payload = {
