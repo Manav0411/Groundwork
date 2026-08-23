@@ -460,10 +460,13 @@ async def run_agent(request: QueryRequest, session: AsyncSession | None = None) 
         # Nothing to ground an answer in, so nothing is generated. Disclose instead of synthesizing.
         answer = NO_EVIDENCE_ANSWER.format(project_id=request.project_id)
     else:
+        # The canned demo brief belongs only to the synthetic sample projects. Keying it on
+        # `not records` leaked Project Atlas prose into real projects answered from web evidence,
+        # which sets `records` to empty — the same fabrication class Phase 1 removed.
         answer = (
-            fallback_answer_from_evidence(request.query, evidence_lines)
-            if records
-            else fallback_weekly_brief_answer()
+            fallback_weekly_brief_answer()
+            if is_synthetic_project(request.project_id) and not records
+            else fallback_answer_from_evidence(request.query, evidence_lines)
         )
         if settings.llm_provider == "ollama":
             with trace.step("Ollama Answer Generator") as step:

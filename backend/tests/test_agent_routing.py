@@ -42,3 +42,20 @@ def test_synthetic_evidence_is_never_lent_to_a_real_project(project_id: str) -> 
     """The fabrication bug: this used to return Project Atlas fixtures for any project id."""
     assert is_synthetic_project(project_id) is False
     assert get_weekly_brief_evidence(project_id) == ([], [])
+
+
+def test_demo_brief_is_scoped_to_synthetic_projects() -> None:
+    """Regression: the canned Project Atlas brief leaked into real projects answered from the web.
+
+    The web-fallback path sets `records` to empty while still holding evidence, and the synthesis
+    branch keyed the demo brief on `not records` rather than on the project actually being a demo.
+    """
+    import inspect
+
+    from app.agent import graph
+
+    source = inspect.getsource(graph.run_agent)
+    marker = "fallback_weekly_brief_answer()"
+    assert marker in source
+    guard = source.split(marker, 1)[1].split("\n)", 1)[0]
+    assert "is_synthetic_project" in guard
