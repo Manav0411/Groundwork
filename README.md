@@ -26,12 +26,17 @@ cosine similarity and falls back to full-text search when embeddings are offline
 typed SQL, so embedding similarity never decides factual ordering.
 
 **Current limitations, stated plainly:** the connectors, persistence, exact-answer SQL paths,
-citation validation, and evaluation gates are complete. Query routing is a deterministic intent
-router rather than a planner-driven graph. Retrieval grading is derived from what retrieval
-returned; there is no corrective retrieval loop yet, so the agent can report that evidence is thin
-but cannot act on it. Retrieval quality is measured against a labelled set
-(`backend/evals/baselines/`); the open gap there is that the retriever cannot yet recognise a
-question its corpus has no answer to, and returns its nearest matches regardless.
+citation validation, retrieval grading, and evaluation gates are complete. Query routing is still a
+deterministic intent router rather than a planner-driven graph. Retrieval and grading quality are
+measured against a labelled set (`backend/evals/baselines/`): retrieval reaches MRR 1.000 but its
+lexical half contributes little on short commit messages, and the grader reaches 0.875 sufficiency
+accuracy, refusing all unanswerable questions but needing the corrective loop to recover questions
+phrased in vocabulary the corpus does not use. Grading costs roughly 8 s per call on CPU.
+
+Ingestion is deliberately **read-only**. Groundwork never writes back to GitHub or Jira and its
+agent takes no actions on your behalf — comparable products sync bi-directionally and let agents
+modify work items, so this is a chosen boundary rather than a missing feature. The system is
+designed to answer questions with traceable evidence, and to refuse when it has none.
 
 ### Answer integrity
 
@@ -143,12 +148,15 @@ cd backend
   --fail-under 1.0
 ```
 
-Measure retrieval quality against the labelled set (run inside the container — a host
+Measure retrieval and grading quality against the labelled set (run inside the container — a host
 PostgreSQL often owns `localhost:5432` and shadows the published port):
 
 ```bash
 docker compose run --rm --no-deps backend python -m evals.retrieval_runner
+docker compose run --rm --no-deps backend python -m evals.grading_runner
 ```
+
+Grading needs a local grader model: `docker exec -it groundwork-ollama ollama pull llama3.2:3b`.
 
 Run the live Jira gate with the same runner:
 

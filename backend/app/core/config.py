@@ -24,6 +24,13 @@ class Settings(BaseSettings):
     llm_timeout_seconds: float = Field(default=30.0, alias="LLM_TIMEOUT_SECONDS")
     llm_fallback_enabled: bool = Field(default=True, alias="LLM_FALLBACK_ENABLED")
 
+    # A small model judges relevance; a larger one writes prose. Grading is a much easier task, and
+    # separating them keeps the corrective loop fast on CPU even if synthesis gets a bigger model.
+    grader_enabled: bool = Field(default=True, alias="GRADER_ENABLED")
+    grader_model: str = Field(default="llama3.2:3b", alias="GRADER_MODEL")
+    grader_timeout_seconds: float = Field(default=45.0, alias="GRADER_TIMEOUT_SECONDS")
+    corrective_max_attempts: int = Field(default=2, alias="CORRECTIVE_MAX_ATTEMPTS")
+
     embedding_provider: str = Field(default="ollama", alias="EMBEDDING_PROVIDER")
     embedding_model: str = Field(default="embeddinggemma", alias="EMBEDDING_MODEL")
     embedding_dimension: int = Field(default=768, alias="EMBEDDING_DIMENSION")
@@ -48,8 +55,15 @@ class Settings(BaseSettings):
     jira_sync_running_timeout_minutes: int = Field(
         default=15, alias="JIRA_SYNC_RUNNING_TIMEOUT_MINUTES"
     )
-    # A Tavily web-search fallback is part of the Phase 2 corrective-retrieval loop. The setting
-    # is intentionally absent until code uses it.
+    # Web-search fallback, used only as the last corrective step when the project's own corpus has
+    # been graded insufficient. Absent by default, which disables it.
+    tavily_api_key: str | None = Field(default=None, alias="TAVILY_API_KEY")
+    tavily_max_results: int = Field(default=4, alias="TAVILY_MAX_RESULTS")
+    tavily_timeout_seconds: float = Field(default=15.0, alias="TAVILY_TIMEOUT_SECONDS")
+
+    @property
+    def web_fallback_enabled(self) -> bool:
+        return bool(self.tavily_api_key)
 
     backend_cors_origins: str = Field(default="http://localhost:3000", alias="BACKEND_CORS_ORIGINS")
 
