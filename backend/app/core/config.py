@@ -20,8 +20,18 @@ class Settings(BaseSettings):
 
     llm_provider: str = Field(default="ollama", alias="LLM_PROVIDER")
     ollama_base_url: str = Field(default="http://localhost:11434", alias="OLLAMA_BASE_URL")
-    ollama_model: str = Field(default="qwen3:8b", alias="OLLAMA_MODEL")
-    llm_timeout_seconds: float = Field(default=30.0, alias="LLM_TIMEOUT_SECONDS")
+    # Synthesis deliberately reuses the grader model. Measured on a 7.8GB Docker VM, keeping a
+    # separate 8B synthesis model resident alongside the 3B grader and the embedding model needs
+    # ~8.6GB and the loader is OOM-killed. One chat model plus embeddings is ~3.6GB, which fits the
+    # 8GB EC2 instance DEPLOYMENT.md targets. qwen3:8b writes slightly better prose and can be set
+    # via OLLAMA_MODEL given ~12GB, but it grades worse: it accepts unanswerable questions, which
+    # is the error direction the corrective loop cannot recover.
+    ollama_model: str = Field(default="llama3.2:3b", alias="OLLAMA_MODEL")
+    # An 8B model generating on CPU exceeds a 30s budget; measured cold-start generations reach
+    # 45s with reasoning enabled. Too low a timeout silently degrades every answer to the
+    # deterministic fallback.
+    llm_timeout_seconds: float = Field(default=120.0, alias="LLM_TIMEOUT_SECONDS")
+    ollama_think: bool = Field(default=False, alias="OLLAMA_THINK")
     llm_fallback_enabled: bool = Field(default=True, alias="LLM_FALLBACK_ENABLED")
 
     # A small model judges relevance; a larger one writes prose. Grading is a much easier task, and
