@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.agent.graph import run_agent
 from app.connectors.github import GitHubRateLimitError
 from app.connectors.jira import JiraRateLimitError
+from app.connectors.slack import SlackAPIError, SlackRateLimitError
 from app.core.security import require_api_key
 from app.db.models import ConnectorSyncState, Project, SourceDocument
 from app.db.session import get_optional_session, get_session
@@ -18,6 +19,7 @@ from app.models.schemas import (
     ProjectSummary,
     QueryRequest,
     QueryResponse,
+    SlackProjectConfig,
     TimelineItem,
 )
 from app.services.github_sync import GitHubSyncInProgressError, sync_github_project
@@ -25,10 +27,24 @@ from app.services.ingestion import seed_synthetic_workspace
 from app.services.jira_sync import JiraSyncInProgressError, sync_jira_project
 from app.services.llm import OllamaClient
 from app.services.persistence import load_trace
+from app.services.slack_sync import SlackSyncInProgressError, sync_slack_project
 
 router = APIRouter()
 DatabaseSession = Annotated[AsyncSession, Depends(get_session)]
 OptionalDatabaseSession = Annotated[AsyncSession | None, Depends(get_optional_session)]
+
+
+def _project_summary(project: Project) -> ProjectSummary:
+    """One place that decides what a project looks like over the wire."""
+    return ProjectSummary(
+        id=project.id,
+        name=project.name,
+        repo=project.repo,
+        jira_project_key=project.jira_project_key,
+        slack_channel_ids=list(project.slack_channel_ids or []),
+        status=project.status,
+        health=project.health,
+    )
 
 
 @router.get("/health")
@@ -130,14 +146,7 @@ async def configure_project_jira(
         raise HTTPException(status_code=404, detail=f"Project {project_id!r} does not exist.")
     project.jira_project_key = request.project_key
     await session.commit()
-    return ProjectSummary(
-        id=project.id,
-        name=project.name,
-        repo=project.repo,
-        jira_project_key=project.jira_project_key,
-        status=project.status,
-        health=project.health,
-    )
+    return _project_summary(project)
 
 
 @router.post("/projects/{project_id}/sync/jira", dependencies=[Depends(require_api_key)])
@@ -167,6 +176,80 @@ async def sync_project_jira(
     return {"status": "synced", **asdict(report)}
 
 
+@router.put(
+    "/projects/{project_id}/connectors/slack",
+    response_model=ProjectSummary,
+    dependencies=[Depends(require_api_key)],
+)
+async def configure_project_slack(
+    project_id: str,
+    request: SlackProjectConfig,
+    session: DatabaseSession,
+) -> ProjectSummary:
+    project = await session.get(Project, project_id)
+    if project is None:
+        raise HTTPException(status_code=404, detail=f"Project {project_id!r} does not exist.")
+    project.slack_channel_ids = request.channel_ids
+    await session.commit()
+    return _project_summary(project)
+
+
+@router.post("/projects/{project_id}/sync/slack", dependencies=[Depends(require_api_key)])
+async def sync_project_slack(
+    project_id: str,
+    session: DatabaseSession,
+    max_messages: int | None = None,
+) -> dict[str, object]:
+    try:
+        report = await sync_slack_project(session, project_id, max_messages=max_messages)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except SlackRateLimitError as exc:
+        raise HTTPException(
+            status_code=429,
+            detail={"message": str(exc), "retry_after_seconds": exc.retry_after_seconds},
+        ) from exc
+    except SlackSyncInProgressError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except SlackAPIError as exc:
+        # Slack reports API failures in the payload, so surface its error code rather than a
+        # generic upstream failure.
+        raise HTTPException(status_code=502, detail=f"Slack API error: {exc.error}") from exc
+    except httpx.HTTPError as exc:
+        raise HTTPException(status_code=502, detail=f"Slack API request failed: {exc}") from exc
+    return {"status": "synced", **asdict(report)}
+
+
+@router.get("/projects/{project_id}/sync/slack", dependencies=[Depends(require_api_key)])
+async def slack_sync_status(project_id: str, session: DatabaseSession) -> dict[str, object]:
+    project = await session.get(Project, project_id)
+    if project is None:
+        raise HTTPException(status_code=404, detail=f"Project {project_id!r} does not exist.")
+    state = await session.scalar(
+        select(ConnectorSyncState).where(
+            ConnectorSyncState.project_id == project_id,
+            ConnectorSyncState.source_type == "slack",
+        )
+    )
+    if state is None:
+        return {
+            "project_id": project_id,
+            "slack_channel_ids": list(project.slack_channel_ids or []),
+            "status": "never_synced",
+        }
+    return {
+        "project_id": project_id,
+        "slack_channel_ids": list(project.slack_channel_ids or []),
+        "status": state.status,
+        "last_started_at": state.last_started_at,
+        "last_succeeded_at": state.last_succeeded_at,
+        "last_error": state.last_error,
+        "rate_limit_remaining": state.rate_limit_remaining,
+    }
+
+
 @router.post(
     "/projects",
     response_model=ProjectSummary,
@@ -179,7 +262,7 @@ async def create_project(request: ProjectCreate, session: DatabaseSession) -> Pr
     project = Project(**request.model_dump())
     session.add(project)
     await session.commit()
-    return ProjectSummary(**request.model_dump())
+    return _project_summary(project)
 
 
 @router.get(
@@ -189,17 +272,7 @@ async def create_project(request: ProjectCreate, session: DatabaseSession) -> Pr
 )
 async def projects(session: DatabaseSession) -> list[ProjectSummary]:
     stored = list((await session.scalars(select(Project).order_by(Project.name))).all())
-    return [
-        ProjectSummary(
-            id=project.id,
-            name=project.name,
-            repo=project.repo,
-            jira_project_key=project.jira_project_key,
-            status=project.status,
-            health=project.health,
-        )
-        for project in stored
-    ]
+    return [_project_summary(project) for project in stored]
 
 
 @router.get(

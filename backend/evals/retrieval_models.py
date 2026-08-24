@@ -8,6 +8,7 @@ RetrievalCategory = Literal[
     "multi_document",
     "paraphrase",
     "cross_source",
+    "decision_rationale",
     "negative",
 ]
 

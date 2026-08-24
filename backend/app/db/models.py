@@ -30,6 +30,11 @@ class Project(TimestampMixin, Base):
     name: Mapped[str] = mapped_column(Text, nullable=False)
     repo: Mapped[str] = mapped_column(Text, nullable=False)
     jira_project_key: Mapped[str | None] = mapped_column(Text)
+    # Explicit channel ids rather than "every channel the bot can see", so indexing scope stays a
+    # deliberate choice: Slack content is people's words.
+    slack_channel_ids: Mapped[list[str]] = mapped_column(
+        ARRAY(Text), nullable=False, default=list, server_default="{}"
+    )
     status: Mapped[str] = mapped_column(Text, nullable=False, default="Unknown")
     health: Mapped[str] = mapped_column(Text, nullable=False, default="gray")
 

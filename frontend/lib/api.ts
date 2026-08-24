@@ -38,6 +38,7 @@ export type Project = {
   name: string;
   repo: string;
   jira_project_key?: string | null;
+  slack_channel_ids?: string[];
   status: string;
   health: "green" | "yellow" | "red" | "gray";
 };
@@ -151,4 +152,42 @@ export function askAgent(query: string, projectId: string): Promise<QueryRespons
     method: "POST",
     body: JSON.stringify({ query, project_id: projectId, include_trace: true })
   });
+}
+
+export type SlackSyncStatus = {
+  project_id: string;
+  slack_channel_ids?: string[];
+  status: "never_synced" | "running" | "succeeded" | "failed" | string;
+  last_started_at?: string | null;
+  last_succeeded_at?: string | null;
+  last_error?: string | null;
+  rate_limit_remaining?: number | null;
+};
+
+export type SlackSyncReport = SlackSyncStatus & {
+  channels: string[];
+  fetched: number;
+  pages_fetched: number;
+  documents: number;
+  chunks: number;
+  embedded: number;
+  completed_at: string;
+};
+
+export function configureSlack(projectId: string, channelIds: string[]): Promise<Project> {
+  return apiRequest<Project>(`/projects/${encodeURIComponent(projectId)}/connectors/slack`, {
+    method: "PUT",
+    body: JSON.stringify({ channel_ids: channelIds })
+  });
+}
+
+export function getSlackSyncStatus(projectId: string): Promise<SlackSyncStatus> {
+  return apiRequest<SlackSyncStatus>(`/projects/${encodeURIComponent(projectId)}/sync/slack`);
+}
+
+export function syncSlack(projectId: string, maxMessages = 500): Promise<SlackSyncReport> {
+  return apiRequest<SlackSyncReport>(
+    `/projects/${encodeURIComponent(projectId)}/sync/slack?max_messages=${maxMessages}`,
+    { method: "POST" }
+  );
 }
