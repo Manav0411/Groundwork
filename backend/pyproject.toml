@@ -16,9 +16,8 @@ dependencies = [
   "httpx>=0.28.0",
   "tenacity>=9.1.0",
   "ollama>=0.5.0",
+  "langgraph>=0.6.0",
 ]
-# NOTE: langgraph / langchain-core / langchain-community were declared here but imported nowhere.
-# They return in Phase 3, when the agent actually becomes a StateGraph.
 
 [project.optional-dependencies]
 dev = [

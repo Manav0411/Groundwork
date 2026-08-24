@@ -23,12 +23,12 @@ def test_classify_query_routes_intents(query: str, expected: str) -> None:
     assert classify_query(query) == expected
 
 
-@pytest.mark.xfail(
-    reason="'commit' is tested before the issue-key pattern; the LangGraph planner in Phase 3 "
-    "replaces this ordering-sensitive router.",
-    strict=True,
-)
 def test_issue_key_wins_over_incidental_commit_mention() -> None:
+    """Was a strict xfail: "commit" used to be tested before the issue-key pattern.
+
+    Routing is ordered by specificity now — a concrete identifier names one record, while a topic
+    word names only a subject area.
+    """
     assert classify_query("Which commits relate to ASK-6?") == "jira_issue_status"
 
 
@@ -52,9 +52,9 @@ def test_demo_brief_is_scoped_to_synthetic_projects() -> None:
     """
     import inspect
 
-    from app.agent import graph
+    from app.agent import nodes
 
-    source = inspect.getsource(graph.run_agent)
+    source = inspect.getsource(nodes.synthesize)
     marker = "fallback_weekly_brief_answer()"
     assert marker in source
     guard = source.split(marker, 1)[1].split("\n)", 1)[0]
