@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.connectors.github import GitHubCommit
 from app.connectors.jira import JiraIssue
+from app.connectors.slack import SlackThread
 from app.connectors.synthetic_workspace import get_projects, get_weekly_brief_evidence
 from app.db.models import DocumentChunk, Project, SourceDocument
 from app.services.llm import OllamaClient
@@ -287,6 +288,55 @@ def jira_issue_documents(project_id: str, issues: list[JiraIssue]) -> list[Inges
                     "comment_count": len(issue.comments),
                     "created_at": issue.created_at,
                     "updated_at": issue.updated_at,
+                },
+            )
+        )
+    return documents
+
+
+def slack_thread_documents(project_id: str, threads: list[SlackThread]) -> list[IngestDocument]:
+    """One document per thread.
+
+    A decision is a discussion, so the thread is the unit that holds the reasoning. Participant
+    identities are normalized the same way GitHub authors and Jira assignees are, so an exact-match
+    tool could be added later without re-ingesting.
+    """
+    documents: list[IngestDocument] = []
+    for thread in threads:
+        root = thread.root
+        headline = root.text.splitlines()[0][:120] if root.text else "(no text)"
+        transcript = " ".join(
+            f"{message.author}: {message.text}" for message in thread.messages if message.text
+        )
+        identities = sorted(
+            {
+                value.strip().casefold()
+                for message in thread.messages
+                for value in (message.author, message.user_id)
+                if value and value.strip()
+            }
+        )
+        documents.append(
+            IngestDocument(
+                project_id=project_id,
+                source_type="slack",
+                external_id=thread.external_id,
+                title=f"#{thread.channel_name} — {headline}",
+                content=(
+                    f"Slack thread in #{thread.channel_name} started by {root.author} with "
+                    f"{len(thread.messages)} message(s). {transcript}"
+                ),
+                url=thread.permalink,
+                author=root.author,
+                author_identities=identities,
+                source_created_at=thread.latest_at,
+                metadata={
+                    "channel_id": thread.channel_id,
+                    "channel_name": thread.channel_name,
+                    "thread_ts": thread.thread_ts,
+                    "participants": thread.participants,
+                    "message_count": len(thread.messages),
+                    "permalink": thread.permalink,
                 },
             )
         )

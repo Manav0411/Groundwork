@@ -1,6 +1,7 @@
+import re
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 RetrievalGrade = Literal["correct", "ambiguous", "incorrect"]
 
@@ -51,6 +52,7 @@ class ProjectSummary(BaseModel):
     name: str
     repo: str
     jira_project_key: str | None = None
+    slack_channel_ids: list[str] = Field(default_factory=list)
     status: str
     health: Literal["green", "yellow", "red", "gray"]
 
@@ -66,6 +68,21 @@ class ProjectCreate(BaseModel):
 
 class JiraProjectConfig(BaseModel):
     project_key: str = Field(pattern=r"^[A-Z][A-Z0-9_]{1,19}$")
+
+
+class SlackProjectConfig(BaseModel):
+    # Slack channel ids look like C01234ABCDE; requiring the id rather than a name keeps the
+    # indexed scope unambiguous when channels are renamed.
+    channel_ids: list[str] = Field(min_length=1, max_length=25)
+
+    @field_validator("channel_ids")
+    @classmethod
+    def validate_channel_ids(cls, value: list[str]) -> list[str]:
+        cleaned = [item.strip().lstrip("#") for item in value]
+        for item in cleaned:
+            if not re.fullmatch(r"[CGD][A-Z0-9]{4,}", item):
+                raise ValueError(f"Invalid Slack channel id: {item!r}")
+        return cleaned
 
 
 class TimelineItem(BaseModel):

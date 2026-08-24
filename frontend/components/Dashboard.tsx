@@ -11,6 +11,7 @@ import {
   GitBranch,
   KeyRound,
   ListChecks,
+  MessagesSquare,
   Loader2,
   Plus,
   RefreshCw,
@@ -25,13 +26,18 @@ import {
   createProject,
   getGitHubSyncStatus,
   getJiraSyncStatus,
+  getSlackSyncStatus,
   listProjects,
   syncGitHub,
   syncJira,
+  syncSlack,
+  configureSlack,
   type GitHubSyncReport,
   type GitHubSyncStatus,
   type JiraSyncReport,
   type JiraSyncStatus,
+  type SlackSyncReport,
+  type SlackSyncStatus,
   type Project,
   type QueryResponse
 } from "@/lib/api";
@@ -183,6 +189,11 @@ export function Dashboard() {
   const [syncStatuses, setSyncStatuses] = useState<Record<string, GitHubSyncStatus>>({});
   const [lastReport, setLastReport] = useState<GitHubSyncReport | null>(null);
   const [jiraStatuses, setJiraStatuses] = useState<Record<string, JiraSyncStatus>>({});
+  const [slackStatuses, setSlackStatuses] = useState<Record<string, SlackSyncStatus>>({});
+  const [lastSlackReport, setLastSlackReport] = useState<SlackSyncReport | null>(null);
+  const [slackChannels, setSlackChannels] = useState("");
+  const [slackSyncing, setSlackSyncing] = useState(false);
+  const [slackConnecting, setSlackConnecting] = useState(false);
   const [lastJiraReport, setLastJiraReport] = useState<JiraSyncReport | null>(null);
   const [jiraProjectKey, setJiraProjectKey] = useState("");
   const [showAddProject, setShowAddProject] = useState(false);
@@ -198,6 +209,8 @@ export function Dashboard() {
   const selectedProject = projects.find((project) => project.id === selectedId) ?? null;
   const selectedSync = selectedId ? syncStatuses[selectedId] : undefined;
   const selectedJiraSync = selectedId ? jiraStatuses[selectedId] : undefined;
+  const selectedSlackSync = selectedId ? slackStatuses[selectedId] : undefined;
+  const slackConnected = Boolean(selectedProject?.slack_channel_ids?.length);
   const traceVerdict = describeTrace(answer);
 
   useEffect(() => {
@@ -207,17 +220,19 @@ export function Dashboard() {
         const loadedProjects = await listProjects();
         const statusEntries = await Promise.all(
           loadedProjects.map(async (project) => {
-            const [github, jira] = await Promise.all([
+            const [github, jira, slack] = await Promise.all([
               getGitHubSyncStatus(project.id),
-              getJiraSyncStatus(project.id)
+              getJiraSyncStatus(project.id),
+              getSlackSyncStatus(project.id)
             ]);
-            return [project.id, github, jira] as const;
+            return [project.id, github, jira, slack] as const;
           })
         );
         if (!active) return;
         setProjects(loadedProjects);
         setSyncStatuses(Object.fromEntries(statusEntries.map(([id, github]) => [id, github])));
         setJiraStatuses(Object.fromEntries(statusEntries.map(([id, , jira]) => [id, jira])));
+        setSlackStatuses(Object.fromEntries(statusEntries.map(([id, , , slack]) => [id, slack])));
         const initialProject = loadedProjects.find((project) => project.id === "askbase") ?? loadedProjects[0];
         setSelectedId(initialProject?.id ?? "");
         setJiraProjectKey(initialProject?.jira_project_key ?? "");
@@ -240,6 +255,10 @@ export function Dashboard() {
       [project.id]: { project_id: project.id, status: "never_synced" }
     }));
     setJiraStatuses((current) => ({
+      ...current,
+      [project.id]: { project_id: project.id, status: "never_synced" }
+    }));
+    setSlackStatuses((current) => ({
       ...current,
       [project.id]: { project_id: project.id, status: "never_synced" }
     }));
@@ -269,6 +288,54 @@ export function Dashboard() {
       setError(err instanceof Error ? err.message : "Could not connect Jira.");
     } finally {
       setJiraConnecting(false);
+    }
+  }
+
+  async function handleConfigureSlack() {
+    if (!selectedProject) return;
+    const ids = slackChannels.split(/[\s,]+/).map((item) => item.trim().replace(/^#/, "")).filter(Boolean);
+    if (!ids.length || ids.some((id) => !/^[CGD][A-Z0-9]{4,}$/.test(id))) {
+      setError("Enter Slack channel IDs such as C01ABC23DEF, separated by commas.");
+      return;
+    }
+    setError(null);
+    setSlackConnecting(true);
+    try {
+      const updated = await configureSlack(selectedProject.id, ids);
+      const status = await getSlackSyncStatus(selectedProject.id);
+      setProjects((current) => current.map((project) => project.id === updated.id ? updated : project));
+      setSlackStatuses((current) => ({ ...current, [updated.id]: status }));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not connect Slack.");
+    } finally {
+      setSlackConnecting(false);
+    }
+  }
+
+  async function handleSlackSync() {
+    if (!selectedProject) return;
+    setError(null);
+    setSlackSyncing(true);
+    setSlackStatuses((current) => ({
+      ...current,
+      [selectedProject.id]: { ...current[selectedProject.id], project_id: selectedProject.id, status: "running" }
+    }));
+    try {
+      const report = await syncSlack(selectedProject.id);
+      setLastSlackReport(report);
+      setSlackStatuses((current) => ({
+        ...current,
+        [selectedProject.id]: { ...report, status: "succeeded", last_succeeded_at: report.completed_at }
+      }));
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Slack sync failed.";
+      setError(message);
+      setSlackStatuses((current) => ({
+        ...current,
+        [selectedProject.id]: { ...current[selectedProject.id], project_id: selectedProject.id, status: "failed", last_error: message }
+      }));
+    } finally {
+      setSlackSyncing(false);
     }
   }
 
@@ -511,6 +578,60 @@ export function Dashboard() {
                 </>
               ) : (
                 <p className="mt-4 rounded-xl border border-blue-100 bg-blue-50 px-4 py-3 text-sm text-blue-800">Enter the short key shown in Jira issue IDs, for example ASK from ASK-6.</p>
+              )}
+            </section>
+          ) : null}
+
+          {selectedProject ? (
+            <section className="rounded-2xl border border-line bg-white p-5 shadow-sm" aria-labelledby="slack-connection-heading">
+              <div className="flex flex-wrap items-start justify-between gap-4">
+                <div className="flex gap-3">
+                  <div className="rounded-xl bg-violet-600 p-2.5 text-white"><MessagesSquare className="h-5 w-5" /></div>
+                  <div>
+                    <h3 className="font-semibold text-slate-950" id="slack-connection-heading">Slack connection</h3>
+                    <p className="mt-1 text-sm text-slate-600">Threads are indexed for decision-history questions commits and tickets cannot answer.</p>
+                  </div>
+                </div>
+                {slackConnected ? (
+                  <button className="primary-button" disabled={slackSyncing} onClick={handleSlackSync} type="button">
+                    {slackSyncing ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+                    {slackSyncing ? "Syncing…" : selectedSlackSync?.status === "never_synced" ? "Run first sync" : "Sync now"}
+                  </button>
+                ) : (
+                  <div className="flex gap-2">
+                    <input
+                      aria-label="Slack channel IDs"
+                      className="w-56 rounded-lg border border-line px-3 text-sm outline-none focus:border-violet-500"
+                      onChange={(event) => setSlackChannels(event.target.value)}
+                      placeholder="C01ABC23DEF, C04XYZ…"
+                      value={slackChannels}
+                    />
+                    <button className="primary-button" disabled={slackConnecting} onClick={handleConfigureSlack} type="button">
+                      {slackConnecting ? <Loader2 className="h-4 w-4 animate-spin" /> : <MessagesSquare className="h-4 w-4" />}
+                      Connect Slack
+                    </button>
+                  </div>
+                )}
+              </div>
+              {slackConnected ? (
+                <>
+                  <div className="mt-5 grid gap-3 sm:grid-cols-3">
+                    <div className="metric-card"><span>Channels</span><strong>{selectedProject.slack_channel_ids?.length ?? 0}</strong></div>
+                    <div className="metric-card"><span>Status</span><strong className="capitalize">{selectedSlackSync?.status?.replace("_", " ") ?? "Loading"}</strong></div>
+                    <div className="metric-card"><span>Last successful sync</span><strong>{formatDate(selectedSlackSync?.last_succeeded_at)}</strong></div>
+                  </div>
+                  {lastSlackReport?.project_id === selectedProject.id ? (
+                    <div className="mt-4 flex flex-wrap gap-x-5 gap-y-2 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">
+                      <span className="flex items-center gap-2 font-medium"><CheckCircle2 className="h-4 w-4" />Sync complete</span>
+                      <span>{lastSlackReport.fetched} threads fetched</span><span>{lastSlackReport.documents} documents</span><span>{lastSlackReport.embedded} embedded</span>
+                    </div>
+                  ) : null}
+                  {selectedSlackSync?.last_error ? (
+                    <p className="mt-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">{selectedSlackSync.last_error}</p>
+                  ) : null}
+                </>
+              ) : (
+                <p className="mt-4 rounded-xl border border-violet-100 bg-violet-50 px-4 py-3 text-sm text-violet-900">Channel IDs, not names — find one under channel details in Slack. Only the channels you list are indexed.</p>
               )}
             </section>
           ) : null}

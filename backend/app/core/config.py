@@ -65,6 +65,15 @@ class Settings(BaseSettings):
     jira_sync_running_timeout_minutes: int = Field(
         default=15, alias="JIRA_SYNC_RUNNING_TIMEOUT_MINUTES"
     )
+    slack_bot_token: str | None = Field(default=None, alias="SLACK_BOT_TOKEN")
+    slack_workspace_domain: str | None = Field(default=None, alias="SLACK_WORKSPACE_DOMAIN")
+    slack_sync_overlap_minutes: int = Field(default=10, alias="SLACK_SYNC_OVERLAP_MINUTES")
+    slack_sync_stale_after_minutes: int = Field(default=60, alias="SLACK_SYNC_STALE_AFTER_MINUTES")
+    slack_sync_max_messages: int = Field(default=500, alias="SLACK_SYNC_MAX_MESSAGES")
+    slack_sync_running_timeout_minutes: int = Field(
+        default=15, alias="SLACK_SYNC_RUNNING_TIMEOUT_MINUTES"
+    )
+
     # Web-search fallback, used only as the last corrective step when the project's own corpus has
     # been graded insufficient. Absent by default, which disables it.
     tavily_api_key: str | None = Field(default=None, alias="TAVILY_API_KEY")
