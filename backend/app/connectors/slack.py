@@ -193,6 +193,19 @@ class SlackConnector:
                 break
         return users
 
+    async def channel_name(self, client: httpx.AsyncClient, channel_id: str) -> str:
+        """Resolve a channel id to its name.
+
+        Costs one call per channel per sync, and without it every citation title reads
+        `#C0BS7F85ADU`, which tells a reader nothing. Falls back to the id if the lookup is denied
+        so a missing scope degrades the title rather than failing the sync.
+        """
+        try:
+            payload, _ = await self._call(client, "conversations.info", {"channel": channel_id})
+        except (SlackAPIError, httpx.HTTPError):
+            return channel_id
+        return str((payload.get("channel") or {}).get("name") or channel_id)
+
     def _message(self, raw: dict, users: dict[str, SlackUser]) -> SlackMessage:
         user_id = str(raw.get("user") or "") or None
         user = users.get(user_id or "")
@@ -221,7 +234,7 @@ class SlackConnector:
 
         async with httpx.AsyncClient(timeout=self.timeout_seconds) as client:
             users = await self.list_users(client)
-            resolved_name = channel_name or channel_id
+            resolved_name = channel_name or await self.channel_name(client, channel_id)
             while pages_fetched < max_pages and len(roots) < max_messages:
                 params: dict[str, object] = {
                     "channel": channel_id,

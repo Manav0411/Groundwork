@@ -23,9 +23,15 @@ def _connector() -> SlackConnector:
     return SlackConnector(bot_token="xoxb-test", workspace_domain="groundwork")
 
 
-def _mock_users(router: respx.Router) -> None:
+def _mock_users(router: respx.Router, channel_name: str = "general") -> None:
+    """Mock the two lookups every sync performs before reading history."""
     router.get("https://slack.com/api/users.list").mock(
         return_value=httpx.Response(200, json=USERS_OK)
+    )
+    router.get("https://slack.com/api/conversations.info").mock(
+        return_value=httpx.Response(
+            200, json={"ok": True, "channel": {"name": channel_name}}
+        )
     )
 
 
@@ -216,3 +222,57 @@ async def test_documents_resolve_user_ids_and_never_leak_them() -> None:
     # Identities are normalized like GitHub authors and Jira assignees, so an exact-match tool
     # could be added later without re-ingesting.
     assert "sarah kim" in document.author_identities
+
+
+@respx.mock
+async def test_channel_ids_are_resolved_to_names_for_citations() -> None:
+    """A citation reading `#C0BS7F85ADU` tells a reader nothing; live data caught this."""
+    respx.get("https://slack.com/api/users.list").mock(
+        return_value=httpx.Response(200, json=USERS_OK)
+    )
+    info = respx.get("https://slack.com/api/conversations.info").mock(
+        return_value=httpx.Response(
+            200, json={"ok": True, "channel": {"id": "C1", "name": "decisions"}}
+        )
+    )
+    respx.get("https://slack.com/api/conversations.history").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "ok": True,
+                "messages": [{"ts": "5.0", "user": "U1", "text": "Do we deploy to EC2?"}],
+                "response_metadata": {"next_cursor": ""},
+            },
+        )
+    )
+
+    result = await _connector().list_threads("C1")
+    (document,) = slack_thread_documents("askbase", result.threads)
+
+    assert info.call_count == 1
+    assert document.title.startswith("#decisions — ")
+    assert "C1" not in document.title
+
+
+@respx.mock
+async def test_channel_name_lookup_failure_degrades_instead_of_failing_the_sync() -> None:
+    respx.get("https://slack.com/api/users.list").mock(
+        return_value=httpx.Response(200, json=USERS_OK)
+    )
+    respx.get("https://slack.com/api/conversations.info").mock(
+        return_value=httpx.Response(200, json={"ok": False, "error": "missing_scope"})
+    )
+    respx.get("https://slack.com/api/conversations.history").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "ok": True,
+                "messages": [{"ts": "5.0", "user": "U1", "text": "hello"}],
+                "response_metadata": {"next_cursor": ""},
+            },
+        )
+    )
+
+    result = await _connector().list_threads("C1")
+
+    assert result.threads[0].channel_name == "C1"
