@@ -26,8 +26,10 @@ cosine similarity and falls back to full-text search when embeddings are offline
 typed SQL, so embedding similarity never decides factual ordering.
 
 **Current limitations, stated plainly:** the connectors, persistence, exact-answer SQL paths,
-citation validation, retrieval grading, and evaluation gates are complete. Query routing is still a
-deterministic intent router rather than a planner-driven graph. Retrieval and grading quality are
+citation validation, retrieval grading, and evaluation gates are complete. The agent is a
+LangGraph `StateGraph` whose corrective loop is a real bounded cycle; routing within it is
+deterministic by design rather than model-driven, because the branches a model would choose between
+all converge on the same retrieval path. Retrieval and grading quality are
 measured against a labelled set (`backend/evals/baselines/`): retrieval reaches MRR 1.000 but its
 lexical half contributes little on short commit messages, and the grader reaches 0.875 sufficiency
 accuracy, refusing all unanswerable questions but needing the corrective loop to recover questions
