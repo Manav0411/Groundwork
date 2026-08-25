@@ -107,6 +107,9 @@ async def sync_slack_project(
     overlap = timedelta(minutes=settings.slack_sync_overlap_minutes)
     incremental_since = previous_success - overlap if previous_success else None
     state = await _mark_started(session, project_id, started_at)
+    # Held as a plain value: see the note in `github_sync.py`. Reading `state.id` after the
+    # failure path's rollback raises MissingGreenlet and masks the real connector error.
+    state_id = state.id
 
     try:
         client = connector or SlackConnector()
@@ -151,7 +154,7 @@ async def sync_slack_project(
         )
     except Exception as exc:
         await session.rollback()
-        state = await session.get(ConnectorSyncState, state.id)
+        state = await session.get(ConnectorSyncState, state_id)
         if state is not None:
             state.status = "failed"
             state.last_error = str(exc)[:2_000]
