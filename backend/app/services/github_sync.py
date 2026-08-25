@@ -91,6 +91,11 @@ async def sync_github_project(
     overlap = timedelta(minutes=settings.github_sync_overlap_minutes)
     incremental_since = previous_success - overlap if previous_success else None
     state = await _mark_started(session, project_id, started_at)
+    # Held as a plain value because `session.rollback()` in the failure path expires every
+    # instance. Reading `state.id` after that rollback triggers a lazy refresh, which raises
+    # MissingGreenlet under asyncio — masking the real connector error and leaving the row on
+    # `running`, where it blocks retries until the running-timeout expires.
+    state_id = state.id
 
     try:
         result = await (connector or GitHubConnector()).list_commits(
@@ -123,7 +128,7 @@ async def sync_github_project(
         )
     except Exception as exc:
         await session.rollback()
-        state = await session.get(ConnectorSyncState, state.id)
+        state = await session.get(ConnectorSyncState, state_id)
         if state is not None:
             state.status = "failed"
             state.last_error = str(exc)[:2000]

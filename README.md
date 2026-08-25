@@ -172,6 +172,33 @@ Run the live Jira gate with the same runner:
 Add `--semantic --judge-model qwen3:8b` only when the local Ollama judge model and the
 `eval` dependency extra are installed. Exact GitHub checks do not require an LLM.
 
+### Tests
+
+Two tiers. The default run needs nothing but the virtualenv, stays under a second, and never opens
+a socket:
+
+```bash
+cd backend
+.venv/bin/python -m pytest
+```
+
+The integration tier runs the real SQL — the fusion query, the content-hash upsert, the connector
+sync state machine, the citation snapshot — against a database built by the shipped migrations. It
+is skipped unless `TEST_DATABASE_URL` is set, and embeddings are stubbed, so it needs no
+credentials and no Ollama:
+
+```bash
+docker compose up -d postgres
+cd backend
+TEST_DATABASE_URL="postgresql+asyncpg://groundwork:groundwork@127.0.0.1:5433/groundwork_test" \
+  .venv/bin/python -m pytest -m integration
+```
+
+Port **5433** is deliberate. The container also publishes 5432, but a developer machine running its
+own PostgreSQL wins that port and silently shadows the container; 5433 always reaches the
+container. The tests create and truncate their own `groundwork_test` database and never touch the
+`groundwork` database holding an indexed corpus.
+
 Frontend:
 
 ```bash

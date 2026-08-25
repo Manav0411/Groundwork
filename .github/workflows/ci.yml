@@ -67,6 +67,13 @@ jobs:
         run: python -m alembic upgrade head
       - name: Models match migrations (no schema drift)
         run: python -m alembic check
+      - name: Integration tests
+        # Runs the real SQL — fusion query, content-hash upsert, sync state machine, citation
+        # snapshot — against the schema the migrations above just built. No credentials and no
+        # Ollama: embeddings are stubbed, so this stays a CI gate rather than a local-only one.
+        run: python -m pytest -m integration
+        env:
+          TEST_DATABASE_URL: postgresql+asyncpg://groundwork:groundwork@localhost:5432/groundwork_test
 
   frontend:
     name: Frontend lint and build
