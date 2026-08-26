@@ -1,0 +1,61 @@
+// Golden conversation dataset. Written from what docs/STATUS.md claims the system does and from
+// questions a user would actually ask — deliberately not from behaviour already known to pass.
+//
+// Convention: declare a HARD expectation (expect_route / expect_grade / expect_citations /
+// expect_gap / answer_excludes) only where the CODE decides the outcome. Grade and citation counts
+// on a retrieval turn are decided by a 3B grader and belong in the measured bucket
+// (answer_contains / expect_resolved / resolved_contains), which is reported as a rate.
+//
+// 1. Exact answers — deterministic SQL, so everything here is hard.
+{"id":"commit_latest_by_author","category":"exact_answer","turns":[{"query":"What was the last commit by Manav0411?","expect_route":"latest_commit","expect_grade":"correct","expect_citations":1,"expect_gap":false,"answer_contains":["f4a941f"]}]}
+{"id":"jira_issue_status","category":"exact_answer","turns":[{"query":"What is the status of ASK-6?","expect_route":"jira_issue_status","expect_grade":"correct","expect_citations":1,"answer_contains":["ASK-6"]}]}
+{"id":"jira_blockers","category":"exact_answer","turns":[{"query":"What blockers are open in AskBase?","expect_route":"blocker_investigation","expect_citations":"some","answer_contains":["ASK-6"]}]}
+{"id":"commit_by_hash","category":"exact_answer","turns":[{"query":"What was commit f4a941f about?","expect_route":"commit_detail","expect_grade":"correct","expect_citations":1,"answer_contains":["README"]}]}
+{"id":"commit_ambiguous_author","category":"ambiguity","turns":[{"query":"What was the last commit by Nobody?","expect_route":"latest_commit","expect_citations":"none","expect_gap":true}]}
+//
+// 2. Resolution shapes — the follow-up forms that broke, one conversation each.
+{"id":"followup_pronoun_jira","category":"resolution","turns":[{"query":"What is the status of ASK-6?","expect_route":"jira_issue_status"},{"query":"Who is it assigned to?","expect_route":"jira_issue_status","expect_citations":1,"expect_resolved":true,"resolved_contains":["ASK-6"]}]}
+{"id":"followup_pronoun_commit","category":"resolution","turns":[{"query":"What was the last commit by Manav0411?","expect_route":"latest_commit"},{"query":"What was it about?","expect_route":"commit_detail","expect_citations":1,"expect_resolved":true,"resolved_contains":["f4a941f"],"answer_excludes":["I could not find"]}]}
+{"id":"followup_ordinal","category":"resolution","turns":[{"query":"What was the last commit by Manav0411?","expect_route":"latest_commit"},{"query":"And what was last second commit?","expect_route":"latest_commit","expect_grade":"correct","expect_citations":1,"expect_resolved":true,"answer_contains":["4121d76"],"answer_excludes":["I need an author name"]}]}
+{"id":"followup_ordinal_chain","category":"resolution","turns":[{"query":"What was the last commit by Manav0411?","expect_route":"latest_commit"},{"query":"And what was last second commit?","expect_route":"latest_commit","answer_contains":["4121d76"]},{"query":"and the one before that?","expect_route":"latest_commit","expect_citations":1,"answer_contains":["257e2e1"],"answer_excludes":["I need an author name"]},{"query":"and the one before that?","expect_route":"latest_commit","expect_citations":1,"answer_contains":["90b8266"]}]}
+{"id":"followup_absolute_ordinal","category":"resolution","turns":[{"query":"What was the last commit by Manav0411?","expect_route":"latest_commit"},{"query":"show me the 3rd latest one","expect_route":"latest_commit","expect_citations":1,"expect_resolved":true,"answer_contains":["257e2e1"],"answer_excludes":["I need an author name"]}]}
+{"id":"followup_out_of_range","category":"resolution","turns":[{"query":"What was the last commit by Manav0411?","expect_route":"latest_commit"},{"query":"what about the 50th one?","expect_route":"latest_commit","expect_citations":"none","expect_gap":true,"answer_contains":["only"],"answer_excludes":["f4a941f"]}]}
+{"id":"followup_underspecified_commit","category":"resolution","turns":[{"query":"What was the last commit by Manav0411?","expect_route":"latest_commit"},{"query":"what features did last commit changed?","expect_resolved":true,"answer_excludes":["I need an author name"]}]}
+{"id":"followup_dangling_demonstrative","category":"resolution","turns":[{"query":"What was the last conversation on slack?"},{"query":"What was the reply by Manav on that ?","expect_resolved":true,"answer_excludes":["I need an author name"]}]}
+{"id":"self_contained_mid_conversation","category":"resolution","turns":[{"query":"What is the status of ASK-6?","expect_route":"jira_issue_status"},{"query":"What was the last commit by Manav0411?","expect_route":"latest_commit","expect_grade":"correct","expect_citations":1,"expect_resolved":false,"answer_contains":["f4a941f"]}]}
+{"id":"topic_switch_jira_to_jira","category":"resolution","turns":[{"query":"What is the status of ASK-6?","expect_route":"jira_issue_status"},{"query":"and ASK-5?","expect_route":"jira_issue_status","expect_citations":1,"answer_contains":["ASK-5"],"answer_excludes":["Ollama memory"]}]}
+//
+// 3. Citation integrity — an invariant on every turn, plus the case that exposed it.
+{"id":"citations_only_when_cited","category":"citations","turns":[{"query":"What was the last conversation on slack?"},{"query":"What was the reply by Manav on that ?","answer_excludes":["I need an author name"]}]}
+{"id":"citations_project_status","category":"citations","turns":[{"query":"What's the status of project right now?","expect_citations":"some","expect_gap":false,"answer_contains":["ASK-"]}]}
+//
+// 4. Refusal — the no-evidence-no-answer contract.
+{"id":"refusal_unanswerable","category":"refusal","turns":[{"query":"What is the Sprint 24 delivery velocity?","expect_grade":"incorrect","expect_citations":"none","expect_gap":true}],"known_limitation":"The corpus grew Slack timing metrics that superficially resemble a velocity figure, so the grader accepts them. Recorded in baselines/slack.md; the question is still unanswerable."}
+{"id":"refusal_absent_topic","category":"refusal","turns":[{"query":"What did the security audit find about our TLS configuration?","expect_grade":"incorrect","expect_citations":"none","expect_gap":true,"answer_excludes":["ASK-"]}]}
+//
+// 5. History must never become evidence.
+{"id":"history_is_not_evidence","category":"integrity","turns":[{"query":"What is the status of ASK-6?","expect_route":"jira_issue_status"},{"query":"Who is it assigned to?","expect_route":"jira_issue_status","expect_citations":1}]}
+//
+// 6. Cross-source — a question needing more than one connector.
+{"id":"cross_source_ec2","category":"cross_source","turns":[{"query":"What is holding up the EC2 deployment?","expect_citations":"some","answer_contains":["EC2"]}]}
+//
+// 7. Decision history — the capability Slack was added for.
+{"id":"decision_history","category":"decision","turns":[{"query":"Why did we move off local HuggingFace embeddings?","expect_citations":"some","answer_contains":["cold start"]}]}
+//
+// 8. Known limitations — reported separately, never gated. Delete the marker when fixed.
+{"id":"aggregate_completion","category":"aggregate","turns":[{"query":"Are all the tasks complete?","expect_citations":"some","expect_gap":false}],"known_limitation":"The grader tests whether a passage supports the answer; a quantifier is answered by the set, not by any member, so all 16 chunks are rejected across three attempts. Rephrasing without the quantifier ('What's the status of project right now?') works."}
+{"id":"commit_feature_detail","category":"corpus_limit","turns":[{"query":"What was the last commit by Manav0411?","expect_route":"latest_commit"},{"query":"what features did last commit changed?","expect_citations":"some","answer_contains":["feature"]}],"known_limitation":"Commit messages record what changed, not which product features it touched. No routing or retrieval work invents evidence the corpus does not hold."}
+//
+// 9. Second wave — written for territory nobody has tested, not for behaviour known to pass.
+//    Expectations come from what STATUS.md claims; failures here are the point of the exercise.
+{"id":"long_conversation_history_cap","category":"exploratory","turns":[{"query":"What is the status of ASK-6?","expect_route":"jira_issue_status"},{"query":"What is the status of ASK-5?","expect_route":"jira_issue_status"},{"query":"What is the status of ASK-1?","expect_route":"jira_issue_status"},{"query":"What is the status of ASK-2?","expect_route":"jira_issue_status"},{"query":"What is the status of ASK-3?","expect_route":"jira_issue_status"},{"query":"What is the status of ASK-4?","expect_route":"jira_issue_status"},{"query":"Who is it assigned to?","expect_route":"jira_issue_status","expect_citations":1,"expect_resolved":true,"resolved_contains":["ASK-4"]}]}
+{"id":"ambiguous_referent","category":"exploratory","turns":[{"query":"What is the status of ASK-6?","expect_route":"jira_issue_status"},{"query":"What was the last commit by Manav0411?","expect_route":"latest_commit"},{"query":"Who is it assigned to?","expect_resolved":true}]}
+{"id":"repeat_same_question","category":"exploratory","turns":[{"query":"What is the status of ASK-6?","expect_route":"jira_issue_status","expect_citations":1},{"query":"What is the status of ASK-6?","expect_route":"jira_issue_status","expect_grade":"correct","expect_citations":1,"expect_resolved":false}]}
+{"id":"followup_after_refusal","category":"exploratory","turns":[{"query":"What did the security audit find about our TLS configuration?","expect_grade":"incorrect","expect_citations":"none"},{"query":"why not?","answer_excludes":["ASK-"]}]}
+{"id":"comparison_two_tickets","category":"exploratory","turns":[{"query":"Which is further along, ASK-5 or ASK-8?","expect_citations":"some","answer_contains":["ASK-5"]}]}
+{"id":"counting_question","category":"exploratory","turns":[{"query":"How many Jira issues are still open?","expect_citations":"some"}]}
+{"id":"person_scoped_work","category":"exploratory","turns":[{"query":"What is Manav Goel working on?","expect_citations":"some"}]}
+{"id":"time_scoped_question","category":"exploratory","turns":[{"query":"What work was done on the Slack connector?","expect_citations":"some","answer_contains":["Slack"]}]}
+{"id":"slack_answer_asked_as_github","category":"exploratory","turns":[{"query":"Which commit dropped the HuggingFace dependency?","expect_citations":"some","answer_contains":["HuggingFace"]}]}
+{"id":"followup_asking_for_source","category":"exploratory","turns":[{"query":"Why did we move off local HuggingFace embeddings?","expect_citations":"some"},{"query":"which channel was that discussed in?","expect_resolved":true,"answer_contains":["decisions"]}]}
+{"id":"pronoun_to_a_person","category":"exploratory","turns":[{"query":"What was the last commit by Manav0411?","expect_route":"latest_commit"},{"query":"what else has he worked on?","expect_resolved":true,"answer_excludes":["I need an author name"]}]}

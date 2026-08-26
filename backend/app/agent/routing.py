@@ -22,6 +22,13 @@ COMMIT_PATTERN = re.compile(r"\bcommits?\b", re.IGNORECASE)
 BLOCKER_PATTERN = re.compile(r"\bblocke(?:r|rs|d)\b", re.IGNORECASE)
 DECISION_PATTERN = re.compile(r"\bdecisions?\b", re.IGNORECASE)
 
+# Superlative commit intent: "the latest commit", "the most recent commit". The structured GitHub
+# tool answers exactly one question — which commit is Nth-newest for an author — so a commit
+# question with neither an author, a hash, nor a position is not a question it can answer.
+LATEST_PATTERN = re.compile(
+    r"\b(?:latest|last|most\s+recent|newest|earliest|first)\b", re.IGNORECASE
+)
+
 
 def classify_query(query: str) -> QueryType:
     """Pick the retrieval path for a question.
@@ -49,9 +56,17 @@ def classify_query(query: str) -> QueryType:
         if extract_commit_offset(query) == 0:
             return "commit_detail"
 
-    # 4. Commit intent, which the structured GitHub tool can answer exactly.
+    # 4. Commit intent the structured GitHub tool can actually answer: it needs an author or a
+    #    position to look up. "Which commit dropped the HuggingFace dependency?" has neither — it
+    #    describes content — and used to reach the tool anyway and be told an author was required,
+    #    for a question no author would have answered. Content questions belong on retrieval.
     if COMMIT_PATTERN.search(query):
-        return "latest_commit"
+        if (
+            extract_commit_author(query)
+            or extract_commit_offset(query)
+            or LATEST_PATTERN.search(query)
+        ):
+            return "latest_commit"
 
     # 5. Topic categories below here all share the hybrid retrieval path; the distinction only
     #    labels the trace.

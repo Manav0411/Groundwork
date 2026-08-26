@@ -359,7 +359,7 @@ def test_carry_forward_ignores_questions_that_are_not_about_commits() -> None:
     ],
 )
 def test_numeric_and_extended_ordinals_are_read(query: str, expected: int) -> None:
-    """"the 50th commit" was read as offset 0 and answered with the newest commit.
+    """ "the 50th commit" was read as offset 0 and answered with the newest commit.
 
     Every field of that answer was well-formed. Only the position was wrong, which is the failure
     mode this whole path exists to prevent, so the word list is not enough on its own.
@@ -482,7 +482,7 @@ def test_a_dangling_demonstrative_is_a_follow_up_even_when_a_person_is_named() -
 
 
 def test_a_demonstrative_with_a_noun_after_it_is_not_dangling() -> None:
-    """"this week" and "that ticket" are ordinary phrases, not back-references on their own."""
+    """ "this week" and "that ticket" are ordinary phrases, not back-references on their own."""
     assert needs_resolution("What shipped this week?") is False
     assert needs_resolution("What was the last commit by Manav0411?") is False
 
@@ -507,3 +507,45 @@ async def test_a_rewrite_containing_a_citation_marker_is_rejected() -> None:
     client = StubOllama({"query": "What did commit f4a941f — “Refactor README” [1] change?"})
 
     assert await resolve_followup("what did it change?", _history(), client) is None
+
+
+def test_a_demonstrative_followed_by_a_verb_is_a_back_reference() -> None:
+    """ "which channel was that discussed in?" points backwards; "that ticket" does not.
+
+    Found by the golden conversation suite: the turn never resolved, because "that" was neither at
+    the end of the clause nor followed by a known noun.
+    """
+    assert needs_resolution("which channel was that discussed in?") is True
+    assert needs_resolution("when was that decided?") is True
+    assert needs_resolution("What shipped this week?") is False
+
+
+def test_a_content_commit_question_is_not_underspecified() -> None:
+    """It is answered by retrieval, so there is nothing for a conversation to fill in."""
+    assert is_underspecified("Which commit dropped the HuggingFace dependency?") is False
+    assert is_underspecified("What was the latest commit?") is True
+
+
+def test_the_history_prompt_marks_the_most_recent_exchange() -> None:
+    """A pronoun almost always refers to the newest turn, and an unlabelled transcript hides that.
+
+    Found by the golden conversation suite: after six Jira questions, "who is it assigned to?"
+    resolved against ASK-5 — the oldest turn still inside the five-turn window — instead of ASK-4,
+    the one immediately before. Labelling the newest exchange took that from 0/2 to 2/2.
+    """
+    from app.agent.followup import build_history_prompt
+
+    history = [
+        ConversationTurn(
+            query="What is the status of ASK-5?", answer="In Progress.", retrieval_grade="correct"
+        ),
+        ConversationTurn(
+            query="What is the status of ASK-4?", answer="Done.", retrieval_grade="correct"
+        ),
+    ]
+
+    prompt = build_history_prompt(history, "who is it assigned to?")
+
+    assert prompt.index("Earlier exchange") < prompt.index("MOST RECENT exchange")
+    # The marker must sit on the newest turn, not merely appear somewhere.
+    assert prompt.index("ASK-4") > prompt.index("MOST RECENT exchange")

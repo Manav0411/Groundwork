@@ -193,6 +193,19 @@ Run the live Jira gate with the same runner:
 Add `--semantic --judge-model qwen3:8b` only when the local Ollama judge model and the
 `eval` dependency extra are installed. Exact GitHub checks do not require an LLM.
 
+Run the golden conversation suite, which is the only tier that exercises multi-turn:
+
+```bash
+.venv/bin/python -m evals.conversation_runner --trials 3 --sync-before --fail-under 1.0
+```
+
+It reports two things separately, because only one of them is decided by code. **Hard checks** —
+which route ran, the grade, whether citations are present, whether every `[n]` marker resolves —
+gate at 1.000. **Measured checks** — whether a follow-up resolved and to what — are run over
+`--trials` passes and reported as a rate, because asserting a 3B model's output once turns
+variance into a red build. Conversations marked `known_limitation` are reported in their own
+bucket and never gate; deleting the marker is how a fix is recorded.
+
 ### Tests
 
 Two tiers. The default run needs nothing but the virtualenv, stays under a second, and never opens
