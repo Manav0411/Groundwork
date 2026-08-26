@@ -17,9 +17,9 @@ were throwaway scripts in `/tmp`.
 
 | | |
 |---|---:|
-| Gated conversations passing every hard check | **32/32** |
+| Gated conversations passing every hard check | **34/34** |
 | Hard pass rate | **1.000** |
-| Known limitations, excluded from the gate | 3 |
+| Known limitations, excluded from the gate | 1 |
 
 Hard checks — route, grade, citation presence, `[n]` marker validity, forbidden text — gate at
 1.000. Measured checks — whether a follow-up resolved and to what — are reported as a rate over the
@@ -71,8 +71,32 @@ Deleting a marker is how a fix gets recorded.
 | Conversation | Why |
 |---|---|
 | `refusal_unanswerable` | *"What is the Sprint 24 delivery velocity?"* is accepted because the corpus grew Slack timing metrics that superficially resemble a velocity figure. Recorded in `slack.md`; the question is still unanswerable |
-| `aggregate_completion` | *"Are all the tasks complete?"* — the grader tests whether a **passage** supports the answer, and a quantifier is answered by the **set**. All 16 chunks are rejected across three attempts. Rephrasing without the quantifier works |
-| `commit_feature_detail` | *"What features did the last commit change?"* resolves and routes correctly, then answers with commit metadata. Commit messages record what changed, not which feature it touched |
+
+## Two limitations closed — 2026-08-26
+
+Both markers were deleted rather than reworded, which is how a fix gets recorded here.
+
+**`aggregate_completion` is now gated and passing.** *"Are all the tasks complete?"* was refused
+because the grader judges whether a **passage** supports the answer and a quantifier is answered by
+the **set** — every chunk was correctly rejected. The earlier note said loosening the grader risked
+the property it exists for, and that was right; what was wrong was assuming the grader had to be
+involved. `structured_jira.py` had no project-wide tool, so the question had nowhere else to go.
+`jira_project_status` counts issues by status category and returns the outstanding ones so the
+count can be cited. No model participates. `counting_question` moved with it.
+
+**`commit_feature_detail` is now gated and passing**, on a narrower claim. The corpus limitation is
+real and unchanged: commit messages record what changed, not which product feature it belonged to.
+What changed is that the answer used to present commit metadata as though it had answered the
+question. It now returns the commit *and* discloses the half it cannot answer. The case does not
+assert a route — resolution may rewrite the follow-up to name the hash (`commit_detail`) or leave
+it positional (`latest_commit`), both defensible, and the disclosure is emitted either way.
+
+## `--fast`
+
+`--fast` runs one trial over the categories whose expectations the code decides: **90 seconds
+against ~50 minutes**. It skips `exploratory`, `cross_source`, `decision`, and `corpus_limit`,
+which is where the runtime goes — those run the corrective loop and several model calls per turn.
+The full suite remains the release gate.
 
 ## Limitations of this baseline
 
