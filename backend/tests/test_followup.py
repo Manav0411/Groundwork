@@ -23,7 +23,7 @@ from app.agent.followup import (
 )
 from app.agent.routing import classify_query
 from app.models.schemas import ConversationTurn
-from app.services.structured_github import extract_commit_offset
+from app.services.structured_github import extract_commit_author, extract_commit_offset
 
 EVAL_DIR = Path(__file__).resolve().parents[1] / "evals"
 
@@ -468,3 +468,30 @@ def test_relative_position_falls_back_to_absolute_without_a_hash() -> None:
         rebuild_positional_question("the previous one", history)
         == "What was the second most recent commit by Manav0411?"
     )
+
+
+def test_a_dangling_demonstrative_is_a_follow_up_even_when_a_person_is_named() -> None:
+    """Naming one record does not resolve a different dangling reference.
+
+    "What was the reply by Manav on that?" names Manav and still leaves "that" pointing at whatever
+    the previous turn was about. Checking `names_a_record` first made the whole question look
+    self-contained, so resolution never ran.
+    """
+    assert needs_resolution("What was the reply by Manav on that ?") is True
+    assert needs_resolution("What did they decide about that?") is True
+
+
+def test_a_demonstrative_with_a_noun_after_it_is_not_dangling() -> None:
+    """"this week" and "that ticket" are ordinary phrases, not back-references on their own."""
+    assert needs_resolution("What shipped this week?") is False
+    assert needs_resolution("What was the last commit by Manav0411?") is False
+
+
+def test_author_extraction_stops_at_any_prepositional_clause() -> None:
+    """Restricting the stop to "on project|repo" captured "Manav on that" as an author name."""
+    assert extract_commit_author("What was the reply by Manav on that ?") == "Manav"
+    assert extract_commit_author("commit by Sarah Kim about the retry logic") == "Sarah Kim"
+    # The repository clauses the eval set depends on must keep working.
+    assert extract_commit_author("last commit by Manav0411 on project AskBase?") == "Manav0411"
+    assert extract_commit_author("commit by Manav0411 for repository AskBase.") == "Manav0411"
+    assert extract_commit_author("What was the last commit by Manav Goel?") == "Manav Goel"

@@ -11,9 +11,13 @@ from app.services.retrieval import RetrievedRecord
 
 AUTHOR_PATTERN = re.compile(
     r"\bby\s+(.+?)(?="
-    r"\s+(?:on|for|in|from)\s+(?:project|repo|repository)\b"
-    # A positional clause ends the name. Without this, "by Manav0411 before 4121d76?" captured
-    # "Manav0411 before 4121d76" as the author and matched nobody.
+    # Any prepositional clause ends the name, not only the ones naming a repository. Restricting
+    # this to "on project|repo" meant "the reply by Manav on that?" captured "Manav on that" as an
+    # author — which matches nobody, and worse, made the question look like it named a record so
+    # follow-up resolution skipped it entirely.
+    r"\s+(?:on|for|in|from|about|regarding|with|at|during)\b"
+    # A positional clause ends it too: "by Manav0411 before 4121d76?" captured the hash as part of
+    # the name.
     r"|\s+(?:before|after|preceding|prior\s+to)\b"
     r"|[?,!]|$)",
     re.IGNORECASE,

@@ -50,6 +50,12 @@ DEMONSTRATIVE_PATTERN = re.compile(
     re.IGNORECASE,
 )
 
+# A demonstrative with no noun after it can only be pointing backwards: "the reply by Manav on
+# that?". Requiring the end of the clause is what keeps "what shipped **this** week" out.
+DANGLING_DEMONSTRATIVE_PATTERN = re.compile(
+    r"\b(?:that|this|those|these)\s*[?.!]*\s*$", re.IGNORECASE
+)
+
 # Openers that are follow-ups regardless of length: they continue a sentence rather than start one.
 CONNECTIVE_PATTERN = re.compile(
     r"^\s*(and\b|what about\b|how about\b|what else\b|who else\b|anything else\b)", re.IGNORECASE
@@ -132,7 +138,14 @@ def needs_resolution(query: str) -> bool:
     even for the underspecified cases this deliberately admits.
     """
     text = query.strip()
-    if not text or names_a_record(text):
+    if not text:
+        return False
+    # Checked before `names_a_record`, because naming one record does not resolve a *different*
+    # dangling reference: "What was the reply by Manav on that?" names Manav and still leaves
+    # "that" pointing at whatever the previous turn was about.
+    if DANGLING_DEMONSTRATIVE_PATTERN.search(text):
+        return True
+    if names_a_record(text):
         return False
     if PRONOUN_PATTERN.search(text) or DEMONSTRATIVE_PATTERN.search(text):
         return True

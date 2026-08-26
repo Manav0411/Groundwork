@@ -517,14 +517,32 @@ async def synthesize(state: AgentState) -> AgentState:
 
 
 async def validate(state: AgentState) -> AgentState:
+    citations = state.get("citations", [])
+    evidence = state.get("evidence", [])
     with state["trace"].step("Citation Validator") as step:
-        result = validate_citations(state.get("answer", ""), state.get("citations", []))
+        result = validate_citations(state.get("answer", ""), citations)
         step.summary = result.summary
+
+        # Only what the answer actually cites is presented as a citation. Retrieval can surface 16
+        # chunks for a question the model then answers from three of them — or from none — and
+        # rendering all 16 under a "Citations" heading implies support the answer never claimed.
+        # The full retrieval stays visible in the trace.
+        cited = set(result.valid_ordinals)
+        kept_citations = [citation for citation in citations if citation.id in cited]
+        kept_evidence = [item for item in evidence if item.citation_id in cited]
+        dropped = len(citations) - len(kept_citations)
+        if dropped:
+            step.summary += (
+                f" Dropped {dropped} retrieved citation(s) the answer did not reference."
+            )
+
     grade = state.get("retrieval_grade", "ambiguous")
     if result.grade_override is not None:
         grade = result.grade_override
     return {
         "answer": result.answer,
+        "citations": kept_citations,
+        "evidence": kept_evidence,
         "retrieval_grade": grade,
         "unresolved_gaps": [*state.get("unresolved_gaps", []), *result.gaps],
     }
