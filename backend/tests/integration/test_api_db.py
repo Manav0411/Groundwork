@@ -212,3 +212,60 @@ async def test_query_still_requires_an_api_key(session, project, client) -> None
     response = await client.post("/query", json={"query": "anything", "project_id": "test-project"})
 
     assert response.status_code == 401
+
+
+async def test_an_exact_commit_answer_is_graded_correct(session, project, client) -> None:
+    """Guards a regression the unit tests could not see.
+
+    Adding the out-of-range branch to the GitHub node displaced `grade = "correct"` into it, so
+    every successful exact answer silently came back `ambiguous`. Content, SHA, and citation were
+    all still right, which is why only the grade revealed it — and only the live eval gate caught
+    it. This asserts the grade directly.
+    """
+    from datetime import UTC, datetime
+
+    from app.connectors.github import GitHubCommit
+    from app.db.models import ConnectorSyncState
+    from app.services.ingestion import github_commit_documents
+
+    session.add(
+        ConnectorSyncState(
+            project_id="test-project",
+            source_type="github",
+            status="succeeded",
+            last_succeeded_at=datetime.now(UTC),
+        )
+    )
+    await ingest_documents(
+        session,
+        github_commit_documents(
+            "test-project",
+            [
+                GitHubCommit(
+                    sha="f4a941f777055b47be553f28115dac1fa5018d93",
+                    message="Refactor README for better structure and clarity",
+                    author="Manav Goel",
+                    author_email="manav@example.com",
+                    author_login="Manav0411",
+                    committer="Manav Goel",
+                    authored_at="2026-05-11T14:38:59Z",
+                    committed_at="2026-05-11T14:38:59Z",
+                    url="https://github.com/acme/test/commit/f4a941f",
+                )
+            ],
+        ),
+        None,
+    )
+
+    body = (
+        await client.post(
+            "/query",
+            headers=HEADERS,
+            json={"query": "What was the last commit by Manav0411?", "project_id": "test-project"},
+        )
+    ).json()
+
+    assert body["retrieval_grade"] == "correct"
+    assert body["unresolved_gaps"] == []
+    assert len(body["citations"]) == 1
+    assert "f4a941f" in body["answer"]

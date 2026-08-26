@@ -21,11 +21,23 @@ async def get_session() -> AsyncIterator[AsyncSession]:
 
 
 async def get_optional_session() -> AsyncIterator[AsyncSession | None]:
-    """Keep query endpoints useful while local Postgres is intentionally offline."""
+    """Keep query endpoints useful while local Postgres is intentionally offline.
+
+    Only the connection attempt is guarded. Wrapping the `yield` as well meant that any exception
+    the endpoint raised was thrown back into this generator, caught here, and answered with a
+    second `yield` — which asyncio reports as `RuntimeError: generator didn't stop after athrow()`,
+    turning every deliberate 404 into an opaque 500. Nothing raised from `/query` until multi-turn
+    added a rejected conversation id, so the fault sat here unexercised.
+    """
+    session = SessionFactory()
     try:
-        async with SessionFactory() as session:
-            await session.execute(text("select 1"))
-            yield session
-    except Exception:
         # Driver-level connection failures are not consistently wrapped by SQLAlchemy.
+        await session.execute(text("select 1"))
+    except Exception:
+        await session.close()
         yield None
+        return
+    try:
+        yield session
+    finally:
+        await session.close()

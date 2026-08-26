@@ -6,6 +6,7 @@ import {
   CheckCircle2,
   ChevronRight,
   Code2,
+  CornerDownRight,
   Copy,
   Database,
   GitBranch,
@@ -15,6 +16,7 @@ import {
   Loader2,
   Plus,
   RefreshCw,
+  RotateCcw,
   Send,
   ShieldCheck,
   X
@@ -52,6 +54,12 @@ const initialAnswer: QueryResponse = {
   evidence: [],
   unresolved_gaps: [],
   trace: []
+};
+
+/** One exchange in the transcript: what was typed, and the response it produced. */
+type TranscriptTurn = {
+  question: string;
+  response: QueryResponse;
 };
 
 function formatDate(value?: string | null) {
@@ -202,9 +210,14 @@ export function Dashboard() {
   const [jiraSyncing, setJiraSyncing] = useState(false);
   const [jiraConnecting, setJiraConnecting] = useState(false);
   const [query, setQuery] = useState("What was the last commit by Manav0411?");
-  const [answer, setAnswer] = useState<QueryResponse>(initialAnswer);
+  const [turns, setTurns] = useState<TranscriptTurn[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [isQueryPending, startQueryTransition] = useTransition();
+
+  // The trace panel and its verdict always describe the most recent turn, so the rest of the page
+  // keeps reading a single `answer` and needs no knowledge of the transcript.
+  const answer = turns.length ? turns[turns.length - 1].response : initialAnswer;
+  const conversationId = turns.length ? turns[turns.length - 1].response.conversation_id : null;
 
   const selectedProject = projects.find((project) => project.id === selectedId) ?? null;
   const selectedSync = selectedId ? syncStatuses[selectedId] : undefined;
@@ -264,6 +277,7 @@ export function Dashboard() {
     }));
     setSelectedId(project.id);
     setJiraProjectKey(project.jira_project_key ?? "");
+    setTurns([]);
     setShowAddProject(false);
     setLastReport(null);
     setLastJiraReport(null);
@@ -409,14 +423,22 @@ export function Dashboard() {
 
   function submitQuery() {
     if (!selectedProject || !query.trim()) return;
+    const question = query.trim();
     setError(null);
     startQueryTransition(async () => {
       try {
-        setAnswer(await askAgent(query.trim(), selectedProject.id));
+        const response = await askAgent(question, selectedProject.id, conversationId);
+        setTurns((previous) => [...previous, { question, response }]);
+        setQuery("");
       } catch (err) {
         setError(err instanceof Error ? err.message : "Unknown request failure.");
       }
     });
+  }
+
+  function startNewConversation() {
+    setTurns([]);
+    setError(null);
   }
 
   async function copyAnswer() {
@@ -472,6 +494,9 @@ export function Dashboard() {
                     setJiraProjectKey(project.jira_project_key ?? "");
                     setLastReport(null);
                     setLastJiraReport(null);
+                    // A conversation is scoped to one project; carrying it across would be
+                    // rejected by the backend anyway.
+                    setTurns([]);
                   }}
                   type="button"
                 >
@@ -655,21 +680,52 @@ export function Dashboard() {
 
           <article className="rounded-2xl border border-line bg-panel shadow-panel">
             <div className="flex items-center justify-between border-b border-line px-5 py-4">
-              <div className="flex items-center gap-3"><h3 className="font-semibold text-slate-950">Answer</h3><span className={`rounded-full px-2.5 py-1 text-xs font-medium ${GRADE_STYLES[answer.retrieval_grade] ?? "bg-slate-100 text-slate-700"}`}>{answer.retrieval_grade}</span></div>
-              <button className="secondary-button" onClick={copyAnswer} type="button"><Copy className="h-4 w-4" />Copy</button>
+              <div className="flex items-center gap-3">
+                <h3 className="font-semibold text-slate-950">Conversation</h3>
+                {turns.length ? <span className="text-xs text-slate-500">{turns.length} turn{turns.length === 1 ? "" : "s"}</span> : null}
+              </div>
+              <div className="flex items-center gap-2">
+                {turns.length ? <button className="secondary-button" onClick={startNewConversation} type="button"><RotateCcw className="h-4 w-4" />New</button> : null}
+                <button className="secondary-button" onClick={copyAnswer} type="button"><Copy className="h-4 w-4" />Copy</button>
+              </div>
             </div>
-            <div className="space-y-5 p-5 text-sm leading-6 text-slate-700">
-              <p>{answer.answer}</p>
-              {answer.citations.length ? (
-                <div><h4 className="mb-2 font-semibold text-slate-950">Citations</h4><div className="flex flex-wrap gap-2">{answer.citations.map((citation) => citation.url ? <a className="rounded-lg border border-blue-100 bg-blue-50 px-2.5 py-1 text-xs text-blue-700 hover:border-blue-300" href={citation.url} key={citation.id} rel="noreferrer" target="_blank">[{citation.id}] {citation.title}</a> : <span className="rounded-lg border border-blue-100 bg-blue-50 px-2.5 py-1 text-xs text-blue-700" key={citation.id}>[{citation.id}] {citation.title}</span>)}</div></div>
-              ) : null}
-              {answer.unresolved_gaps.length ? (
-                <div className="rounded-xl border border-amber-200 bg-amber-50 p-4">
-                  <h4 className="mb-2 flex items-center gap-2 font-semibold text-amber-900"><AlertCircle className="h-4 w-4" />Unresolved gaps</h4>
-                  <ul className="list-disc space-y-1 pl-5 text-xs text-amber-900">{answer.unresolved_gaps.map((gap) => <li key={gap}>{gap}</li>)}</ul>
-                </div>
-              ) : null}
-            </div>
+
+            {turns.length ? (
+              <div className="divide-y divide-line">
+                {turns.map((turn, index) => (
+                  <div className="space-y-4 p-5 text-sm leading-6 text-slate-700" key={`${turn.response.conversation_id}-${index}`}>
+                    <div>
+                      <p className="font-medium text-slate-950">{turn.question}</p>
+                      {/* Shown only when the question was rewritten, which is the feature made visible. */}
+                      {turn.response.resolved_query ? (
+                        <p className="mt-1 flex items-start gap-1.5 text-xs text-slate-500">
+                          <CornerDownRight className="mt-0.5 h-3 w-3 shrink-0" />
+                          <span>Resolved to “{turn.response.resolved_query}”</span>
+                        </p>
+                      ) : null}
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className={`rounded-full px-2.5 py-1 text-xs font-medium ${GRADE_STYLES[turn.response.retrieval_grade] ?? "bg-slate-100 text-slate-700"}`}>{turn.response.retrieval_grade}</span>
+                    </div>
+                    <p>{turn.response.answer}</p>
+                    {turn.response.citations.length ? (
+                      <div><h4 className="mb-2 font-semibold text-slate-950">Citations</h4><div className="flex flex-wrap gap-2">{turn.response.citations.map((citation) => citation.url ? <a className="rounded-lg border border-blue-100 bg-blue-50 px-2.5 py-1 text-xs text-blue-700 hover:border-blue-300" href={citation.url} key={citation.id} rel="noreferrer" target="_blank">[{citation.id}] {citation.title}</a> : <span className="rounded-lg border border-blue-100 bg-blue-50 px-2.5 py-1 text-xs text-blue-700" key={citation.id}>[{citation.id}] {citation.title}</span>)}</div></div>
+                    ) : null}
+                    {turn.response.unresolved_gaps.length ? (
+                      <div className="rounded-xl border border-amber-200 bg-amber-50 p-4">
+                        <h4 className="mb-2 flex items-center gap-2 font-semibold text-amber-900"><AlertCircle className="h-4 w-4" />Unresolved gaps</h4>
+                        <ul className="list-disc space-y-1 pl-5 text-xs text-amber-900">{turn.response.unresolved_gaps.map((gap) => <li key={gap}>{gap}</li>)}</ul>
+                      </div>
+                    ) : null}
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="p-5 text-sm leading-6 text-slate-700">
+                <p>{initialAnswer.answer}</p>
+                <p className="mt-3 text-xs text-slate-500">Ask a follow-up after the first answer — “who is it assigned to?” is resolved against the conversation before it is routed.</p>
+              </div>
+            )}
           </article>
         </section>
 

@@ -160,6 +160,10 @@ class QueryRun(TimestampMixin, Base):
         ForeignKey("conversations.id", ondelete="CASCADE"), nullable=False
     )
     query: Mapped[str] = mapped_column(Text, nullable=False)
+    # The standalone question a follow-up was answered as. Null when the question was already
+    # self-contained, which is the common case. Stored so a chain of follow-ups resolves against a
+    # real question rather than against another pronoun.
+    resolved_query: Mapped[str | None] = mapped_column(Text)
     query_type: Mapped[str] = mapped_column(Text, nullable=False)
     answer: Mapped[str] = mapped_column(Text, nullable=False)
     retrieval_grade: Mapped[str] = mapped_column(Text, nullable=False)

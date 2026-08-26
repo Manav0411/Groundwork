@@ -31,6 +31,8 @@ export type QueryResponse = {
   evidence: EvidenceItem[];
   unresolved_gaps: string[];
   trace: TraceStep[];
+  /** The standalone question a follow-up was answered as; null when it was already self-contained. */
+  resolved_query?: string | null;
 };
 
 export type Project = {
@@ -147,10 +149,20 @@ export function syncJira(projectId: string, maxIssues = 500): Promise<JiraSyncRe
   );
 }
 
-export function askAgent(query: string, projectId: string): Promise<QueryResponse> {
+export function askAgent(
+  query: string,
+  projectId: string,
+  conversationId?: string | null
+): Promise<QueryResponse> {
   return apiRequest<QueryResponse>("/query", {
     method: "POST",
-    body: JSON.stringify({ query, project_id: projectId, include_trace: true })
+    body: JSON.stringify({
+      query,
+      project_id: projectId,
+      include_trace: true,
+      // Omitted on the first turn; the backend then mints a new conversation.
+      conversation_id: conversationId ?? null
+    })
   });
 }
 

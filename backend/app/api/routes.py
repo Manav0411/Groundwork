@@ -26,7 +26,11 @@ from app.services.github_sync import GitHubSyncInProgressError, sync_github_proj
 from app.services.ingestion import seed_synthetic_workspace
 from app.services.jira_sync import JiraSyncInProgressError, sync_jira_project
 from app.services.llm import OllamaClient
-from app.services.persistence import load_trace
+from app.services.persistence import (
+    ConversationNotFoundError,
+    load_conversation_history,
+    load_trace,
+)
 from app.services.slack_sync import SlackSyncInProgressError, sync_slack_project
 
 router = APIRouter()
@@ -79,7 +83,12 @@ async def query(
     request: QueryRequest,
     session: OptionalDatabaseSession,
 ) -> QueryResponse:
-    return await run_agent(request, session)
+    try:
+        return await run_agent(request, session)
+    except ConversationNotFoundError as exc:
+        # An unknown or cross-project conversation id is an error, not a quiet new conversation:
+        # silently starting over would look like the agent had simply forgotten the thread.
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
 @router.post("/ingest/workspace", dependencies=[Depends(require_api_key)])
@@ -368,6 +377,23 @@ async def project_timeline(
         )
         for document in documents
     ]
+
+
+@router.get("/conversations/{conversation_id}", dependencies=[Depends(require_api_key)])
+async def conversation_turns(
+    conversation_id: str,
+    session: DatabaseSession,
+    project_id: str,
+    limit: int = 50,
+) -> dict[str, object]:
+    """The conversation as a list of turns, so a reloaded page can restore the thread."""
+    try:
+        turns = await load_conversation_history(
+            session, conversation_id, project_id, limit=max(1, min(limit, 200))
+        )
+    except ConversationNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return {"conversation_id": conversation_id, "project_id": project_id, "turns": turns}
 
 
 @router.get("/conversations/{conversation_id}/trace", dependencies=[Depends(require_api_key)])

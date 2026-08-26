@@ -1,10 +1,12 @@
 import pytest
 
 from app.agent.graph import classify_query
+from app.agent.routing import is_structured
 from app.connectors.synthetic_workspace import (
     get_weekly_brief_evidence,
     is_synthetic_project,
 )
+from app.services.structured_github import extract_commit_author, extract_commit_sha
 
 
 @pytest.mark.parametrize(
@@ -59,3 +61,37 @@ def test_demo_brief_is_scoped_to_synthetic_projects() -> None:
     assert marker in source
     guard = source.split(marker, 1)[1].split("\n)", 1)[0]
     assert "is_synthetic_project" in guard
+
+
+def test_a_named_commit_hash_gets_its_own_exact_lookup() -> None:
+    """A question naming one record has an exact answer, so it must not be summarized.
+
+    This routed to retrieval first, as a quick fix for "what features did the commit f4a941f
+    change?" being told an author was required. Retrieval was the wrong destination: it found the
+    right commit and the 3B model then answered "I couldn't find any information about commit
+    f4a941f" — contradicting the evidence in position one. It is a structured path now.
+    """
+    assert classify_query("What was commit f4a941f about?") == "commit_detail"
+    assert classify_query("What features did the commit f4a941f change?") == "commit_detail"
+    assert is_structured("commit_detail") is True
+
+
+def test_a_commit_question_without_a_hash_still_reaches_the_structured_tool() -> None:
+    """Guards the live eval cases that expect "I need an author name"."""
+    assert classify_query("What was the latest commit?") == "latest_commit"
+    assert classify_query("Show me the most recent commit in AskBase") == "latest_commit"
+
+
+def test_hex_looking_words_are_not_mistaken_for_commit_hashes() -> None:
+    """"defaced" is seven hex characters; requiring a digit is what separates it from a SHA."""
+    assert extract_commit_sha("the commit defaced the layout") is None
+    assert extract_commit_sha("commit f4a941f") == "f4a941f"
+
+
+def test_author_extraction_stops_at_a_positional_clause() -> None:
+    """"by Manav0411 before 4121d76?" once captured the whole tail as the author name."""
+    assert extract_commit_author("What was the commit by Manav0411 before 4121d76?") == "Manav0411"
+    assert extract_commit_author("the commit by Sarah Kim after abc1234") == "Sarah Kim"
+    # The clauses that already worked must keep working.
+    assert extract_commit_author("last commit by Manav0411 on project AskBase?") == "Manav0411"
+    assert extract_commit_author("What was the last commit by Manav Goel?") == "Manav Goel"

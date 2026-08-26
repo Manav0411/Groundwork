@@ -40,6 +40,9 @@ class Settings(BaseSettings):
     grader_model: str = Field(default="llama3.2:3b", alias="GRADER_MODEL")
     grader_timeout_seconds: float = Field(default=45.0, alias="GRADER_TIMEOUT_SECONDS")
     corrective_max_attempts: int = Field(default=2, alias="CORRECTIVE_MAX_ATTEMPTS")
+    # How many earlier turns feed follow-up resolution. Bounded so the prompt cannot grow with the
+    # conversation; five is well past the point where a pronoun still refers backwards.
+    conversation_history_turns: int = Field(default=5, alias="CONVERSATION_HISTORY_TURNS")
 
     embedding_provider: str = Field(default="ollama", alias="EMBEDDING_PROVIDER")
     embedding_model: str = Field(default="embeddinggemma", alias="EMBEDDING_MODEL")
