@@ -95,3 +95,25 @@ def test_author_extraction_stops_at_a_positional_clause() -> None:
     # The clauses that already worked must keep working.
     assert extract_commit_author("last commit by Manav0411 on project AskBase?") == "Manav0411"
     assert extract_commit_author("What was the last commit by Manav Goel?") == "Manav Goel"
+
+
+def test_a_commit_question_describing_content_goes_to_retrieval() -> None:
+    """The structured tool answers one question: which commit is Nth-newest for an author.
+
+    "Which commit dropped the HuggingFace dependency?" names no author, no hash, and no position,
+    so it reached that tool and was told an author was required — for a question no author would
+    have answered. The golden conversation suite found this on a first turn, where no amount of
+    follow-up resolution could have helped.
+    """
+    assert classify_query("Which commit dropped the HuggingFace dependency?") != "latest_commit"
+    assert classify_query("Which commit introduced the retry logic?") != "latest_commit"
+
+
+def test_superlative_commit_questions_still_reach_the_structured_tool() -> None:
+    """Guards the three live eval cases that expect "I need an author name"."""
+    for query in (
+        "What was the latest commit?",
+        "Show me the most recent commit in AskBase",
+        "What is the latest commit on project AskBase?",
+    ):
+        assert classify_query(query) == "latest_commit", query

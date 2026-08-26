@@ -21,9 +21,17 @@ services:
       timeout: 5s
       retries: 5
 
+  # Not started by default. Docker Desktop cannot reach the Apple Silicon GPU, so a containerised
+  # Ollama runs on emulated CPU: measured at 7.2 tok/s for llama3.2:3b against 40 tok/s from the
+  # same model served natively on the same machine. Run Ollama on the host instead (see README).
+  #
+  # This service remains for hosts where the container *can* use the GPU — Linux with the NVIDIA
+  # container toolkit — and for a self-contained demo where speed does not matter:
+  #     docker compose --profile bundled-ollama up
   ollama:
     image: ollama/ollama:latest
     container_name: groundwork-ollama
+    profiles: ["bundled-ollama"]
     ports:
       - "11434:11434"
     volumes:
@@ -37,14 +45,17 @@ services:
       - .env
     environment:
       DATABASE_URL: postgresql+asyncpg://groundwork:groundwork@postgres:5432/groundwork
-      OLLAMA_BASE_URL: http://ollama:11434
+      # The host's Ollama, which on macOS is the only one with GPU access. Override in .env with
+      # http://ollama:11434 when running the bundled-ollama profile.
+      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
+    # Docker Desktop provides this name; the mapping keeps the same compose file working on Linux.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     ports:
       - "8000:8000"
     depends_on:
       postgres:
         condition: service_healthy
-      ollama:
-        condition: service_started
 
   frontend:
     build:

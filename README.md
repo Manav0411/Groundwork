@@ -17,7 +17,7 @@ The project is free-first: Ollama/local open models are the default, PostgreSQL 
 
 - `backend/` — FastAPI backend with a deterministic intent router
 - `frontend/` — Next.js demo UI
-- `docker-compose.yml` — Postgres, Ollama, backend, frontend
+- `docker-compose.yml` — Postgres, backend, frontend (Ollama runs on the host; see Local setup)
 
 The backend persists projects, source documents, chunks, conversations, query runs, citations,
 retrieved evidence, and agent traces. Retrieval combines PostgreSQL full-text search with pgvector
@@ -30,10 +30,10 @@ citation validation, retrieval grading, and evaluation gates are complete. The a
 LangGraph `StateGraph` whose corrective loop is a real bounded cycle; routing within it is
 deterministic by design rather than model-driven, because the branches a model would choose between
 all converge on the same retrieval path. Retrieval and grading quality are
-measured against a labelled set (`backend/evals/baselines/`): retrieval reaches MRR 1.000 but its
-lexical half contributes little on short commit messages, and the grader reaches 0.875 sufficiency
-accuracy, refusing all unanswerable questions but needing the corrective loop to recover questions
-phrased in vocabulary the corpus does not use. Grading costs roughly 8 s per call on CPU.
+measured against a labelled set (`backend/evals/baselines/`): retrieval reaches MRR 0.941 and
+recall@8 0.807, and the grader reaches 0.950 sufficiency accuracy, needing the corrective loop to
+recover questions phrased in vocabulary the corpus does not use. With Ollama on the GPU a RAG turn
+takes 3-5 s and an exact-answer turn a few milliseconds; grading is 3.4 s of that.
 
 Ingestion is deliberately **read-only**. Groundwork never writes back to GitHub or Jira and its
 agent takes no actions on your behalf — comparable products sync bi-directionally and let agents
@@ -59,7 +59,25 @@ cp .env.example .env
 Start infrastructure:
 
 ```bash
-docker compose up -d postgres ollama
+docker compose up -d postgres
+```
+
+Run Ollama on the host, not in Docker:
+
+```bash
+brew install ollama          # or https://ollama.com/download
+ollama serve
+```
+
+**This is not a preference.** Docker Desktop cannot reach the Apple Silicon GPU, so a containerised
+Ollama runs every token on emulated CPU: measured on an M4, the same model does 7.2 tok/s in the
+container against 40 tok/s on the host, which is the difference between a ~40s answer and a ~4s
+one. The compose file still defines an `ollama` service for hosts where the container *can* use the
+GPU — Linux with the NVIDIA container toolkit — or for a self-contained demo where speed does not
+matter:
+
+```bash
+docker compose --profile bundled-ollama up -d      # then set OLLAMA_BASE_URL=http://ollama:11434
 ```
 
 Build the backend and apply migrations:
@@ -72,9 +90,12 @@ docker compose run --rm --no-deps backend alembic upgrade head
 Pull local models:
 
 ```bash
-docker exec -it groundwork-ollama ollama pull qwen3:8b
-docker exec -it groundwork-ollama ollama pull embeddinggemma
+ollama pull llama3.2:3b        # grading and synthesis
+ollama pull embeddinggemma     # embeddings
 ```
+
+`scripts/check_local.sh` reports which Ollama is answering and measures its throughput, so a silent
+regression back to CPU is visible rather than merely slow.
 
 Verify the configured Ollama model:
 
@@ -158,7 +179,7 @@ docker compose run --rm --no-deps backend python -m evals.retrieval_runner
 docker compose run --rm --no-deps backend python -m evals.grading_runner
 ```
 
-Grading needs a local grader model: `docker exec -it groundwork-ollama ollama pull llama3.2:3b`.
+Grading needs a local grader model: `ollama pull llama3.2:3b`.
 
 Run the live Jira gate with the same runner:
 
@@ -171,6 +192,19 @@ Run the live Jira gate with the same runner:
 
 Add `--semantic --judge-model qwen3:8b` only when the local Ollama judge model and the
 `eval` dependency extra are installed. Exact GitHub checks do not require an LLM.
+
+Run the golden conversation suite, which is the only tier that exercises multi-turn:
+
+```bash
+.venv/bin/python -m evals.conversation_runner --trials 3 --sync-before --fail-under 1.0
+```
+
+It reports two things separately, because only one of them is decided by code. **Hard checks** —
+which route ran, the grade, whether citations are present, whether every `[n]` marker resolves —
+gate at 1.000. **Measured checks** — whether a follow-up resolved and to what — are run over
+`--trials` passes and reported as a rate, because asserting a 3B model's output once turns
+variance into a red build. Conversations marked `known_limitation` are reported in their own
+bucket and never gate; deleting the marker is how a fix is recorded.
 
 ### Tests
 

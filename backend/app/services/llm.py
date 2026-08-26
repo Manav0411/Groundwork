@@ -79,6 +79,12 @@ class OllamaClient:
             "model": model or self.model,
             "stream": False,
             "format": "json",
+            # Must match `generate`. This was omitted while the grader ran a model with no
+            # reasoning mode, so it cost nothing and stayed invisible. On a reasoning model every
+            # grading, rewrite, and follow-up-resolution call would silently think first — measured
+            # at 44.7s versus 6.1s — and the symptom would look like "the bigger model is too slow"
+            # rather than a missing flag.
+            "think": settings.ollama_think,
             "messages": [
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt},
@@ -172,12 +178,28 @@ def fallback_answer_from_evidence(query: str, evidence_lines: list[str]) -> str:
     )
 
 
-def build_answer_prompt(query: str, evidence_lines: list[str]) -> tuple[str, str]:
+def build_answer_prompt(
+    query: str, evidence_lines: list[str], *, insist_on_citations: bool = False
+) -> tuple[str, str]:
+    """Build the synthesis prompt.
+
+    `insist_on_citations` is the second attempt. The model produces good answers that carry no
+    `[n]` markers often enough to matter, and an uncited answer is stripped of its citations by the
+    validator — so a correct answer arrives looking unsupported. Retrying once with an explicit
+    instruction is cheaper and more honest than attaching citations the answer never claimed.
+    """
     system_prompt = (
         "You are an engineering project intelligence agent. Answer only from the supplied "
-        "evidence. Preserve bracketed citation ids exactly, for example [1]. If evidence is "
-        "missing, say what is missing instead of inventing facts. Keep the answer concise."
+        "evidence. Every sentence that states a fact must end with the bracketed id of the "
+        "evidence it came from, copied exactly, for example [1]. An answer with no bracketed ids "
+        "is not acceptable. If evidence is missing, say what is missing instead of inventing "
+        "facts. Keep the answer concise."
     )
+    if insist_on_citations:
+        system_prompt += (
+            " Your previous attempt contained no bracketed ids. Rewrite it so every factual "
+            "sentence carries the id of the evidence line it came from."
+        )
     user_prompt = (
         f"User query: {query}\n\n"
         "Evidence:\n" + "\n".join(evidence_lines) + "\n\nReturn a cited engineering project answer."

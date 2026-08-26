@@ -20,25 +20,42 @@ class Settings(BaseSettings):
 
     llm_provider: str = Field(default="ollama", alias="LLM_PROVIDER")
     ollama_base_url: str = Field(default="http://localhost:11434", alias="OLLAMA_BASE_URL")
-    # Synthesis deliberately reuses the grader model. Measured on a 7.8GB Docker VM, keeping a
-    # separate 8B synthesis model resident alongside the 3B grader and the embedding model needs
-    # ~8.6GB and the loader is OOM-killed. One chat model plus embeddings is ~3.6GB, which fits the
-    # 8GB EC2 instance DEPLOYMENT.md targets. qwen3:8b writes slightly better prose and can be set
-    # via OLLAMA_MODEL given ~12GB, but it grades worse: it accepts unanswerable questions, which
-    # is the error direction the corrective loop cannot recover.
+    # Synthesis reuses the grader model, and the reason is residency rather than quality.
+    #
+    # On quality alone qwen3:8b is the better writer: asked why local embeddings were dropped, it
+    # cited only the retrieved text, while llama3.2:3b added "reduce maintenance burden", which
+    # appears nowhere in the evidence. 4.0s against 2.6s warm would be worth that.
+    #
+    # But the two chat models plus the embedder are ~9.1GB, and Ollama will not hold that much on a
+    # 16GB Mac — loading one evicts another even with OLLAMA_MAX_LOADED_MODELS=3. Alternating a 3B
+    # grader with an 8B writer then pays a model load on nearly every request: measured end to end,
+    # a RAG turn went 4.5s with one shared model to 18-22s with the split, of which ~8s was
+    # reloading. Four times the latency to avoid one ungrounded adjective is the wrong trade, and
+    # the grader plus citation validation already guard the failure modes that matter.
+    #
+    # Set OLLAMA_MODEL=qwen3:8b on a machine with enough memory to keep both resident.
     ollama_model: str = Field(default="llama3.2:3b", alias="OLLAMA_MODEL")
-    # An 8B model generating on CPU exceeds a 30s budget; measured cold-start generations reach
-    # 45s with reasoning enabled. Too low a timeout silently degrades every answer to the
-    # deterministic fallback.
-    llm_timeout_seconds: float = Field(default=120.0, alias="LLM_TIMEOUT_SECONDS")
+    # Sized for a warm generation plus one cold model load. Synthesis measures ~3s warm; a first
+    # request that has to page the model in costs roughly 10s more. Too low a timeout silently
+    # degrades every answer to the deterministic fallback, so this keeps real headroom.
+    llm_timeout_seconds: float = Field(default=60.0, alias="LLM_TIMEOUT_SECONDS")
     ollama_think: bool = Field(default=False, alias="OLLAMA_THINK")
     llm_fallback_enabled: bool = Field(default=True, alias="LLM_FALLBACK_ENABLED")
 
-    # A small model judges relevance; a larger one writes prose. Grading is a much easier task, and
-    # separating them keeps the corrective loop fast on CPU even if synthesis gets a bigger model.
+    # Grading — llama3.2:3b, and this is the direction where bigger lost. Measured over
+    # evals/retrieval_dataset.jsonl with Ollama on Metal:
+    #
+    #                     accuracy   refused   paraphrase    mean     max
+    #   llama3.2:3b         0.950      2/3         2/2       3.4s    4.7s
+    #   qwen3:8b            0.900      3/3         1/2      15.0s   35.8s
+    #
+    # qwen3:8b refuses one more unanswerable question and loses more elsewhere, at 4.4x the
+    # latency. Grading is a long-prompt classification over 8-16 chunks that yields one bit of
+    # signal, and prompt throughput is exactly where the small model dominates: 362 tok/s
+    # against 109 tok/s.
     grader_enabled: bool = Field(default=True, alias="GRADER_ENABLED")
     grader_model: str = Field(default="llama3.2:3b", alias="GRADER_MODEL")
-    grader_timeout_seconds: float = Field(default=45.0, alias="GRADER_TIMEOUT_SECONDS")
+    grader_timeout_seconds: float = Field(default=30.0, alias="GRADER_TIMEOUT_SECONDS")
     corrective_max_attempts: int = Field(default=2, alias="CORRECTIVE_MAX_ATTEMPTS")
     # How many earlier turns feed follow-up resolution. Bounded so the prompt cannot grow with the
     # conversation; five is well past the point where a pronoun still refers backwards.

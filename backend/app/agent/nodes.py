@@ -17,7 +17,7 @@ from app.connectors.synthetic_workspace import get_weekly_brief_evidence, is_syn
 from app.connectors.tavily import TavilyConnector, web_results_to_response
 from app.core.config import settings
 from app.models.schemas import RetrievalGrade
-from app.services.citations import validate_citations
+from app.services.citations import CITATION_MARKER, validate_citations
 from app.services.grading import grade_retrieval, rewrite_query
 from app.services.llm import (
     OllamaClient,
@@ -503,9 +503,25 @@ async def synthesize(state: AgentState) -> AgentState:
     if settings.llm_provider == "ollama":
         with state["trace"].step("Ollama Answer Generator") as step:
             try:
+                client = OllamaClient()
                 system_prompt, user_prompt = build_answer_prompt(request.query, evidence_lines)
-                answer = await OllamaClient().generate(system_prompt, user_prompt)
+                answer = await client.generate(system_prompt, user_prompt)
                 step.summary = f"Generated answer with local model {settings.ollama_model}."
+
+                # A good answer that carries no [n] markers is stripped of every citation by the
+                # validator, so it reaches the user looking unsupported when it was not. One
+                # bounded retry with an explicit instruction is cheaper than that outcome, and
+                # more honest than attaching citations the answer never claimed.
+                if not CITATION_MARKER.search(answer):
+                    system_prompt, user_prompt = build_answer_prompt(
+                        request.query, evidence_lines, insist_on_citations=True
+                    )
+                    retried = await client.generate(system_prompt, user_prompt)
+                    if CITATION_MARKER.search(retried):
+                        answer = retried
+                        step.summary += " First attempt cited nothing; retried and it cited."
+                    else:
+                        step.summary += " Cited nothing on both attempts."
             except Exception as exc:
                 if not settings.llm_fallback_enabled:
                     raise
