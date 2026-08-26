@@ -79,6 +79,12 @@ class OllamaClient:
             "model": model or self.model,
             "stream": False,
             "format": "json",
+            # Must match `generate`. This was omitted while the grader ran a model with no
+            # reasoning mode, so it cost nothing and stayed invisible. On a reasoning model every
+            # grading, rewrite, and follow-up-resolution call would silently think first — measured
+            # at 44.7s versus 6.1s — and the symptom would look like "the bigger model is too slow"
+            # rather than a missing flag.
+            "think": settings.ollama_think,
             "messages": [
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt},
