@@ -122,3 +122,40 @@ def test_superlative_commit_questions_still_reach_the_structured_tool() -> None:
         "What is the latest commit on project AskBase?",
     ):
         assert classify_query(query) == "latest_commit", query
+
+
+@pytest.mark.parametrize(
+    "query",
+    [
+        "Are all the tasks complete?",
+        "How many Jira issues are still open?",
+        "Is every ticket done?",
+        "How many stories are outstanding?",
+    ],
+)
+def test_quantifier_questions_reach_the_counting_tool(query: str) -> None:
+    """These had no answer before: the grader rejects every chunk, correctly.
+
+    Sufficiency is judged per passage, and a quantifier is answered by the set — no single chunk
+    states that all the work is done. Counting rows answers it exactly instead, so the question
+    belongs on the deterministic path rather than in retrieval.
+    """
+    assert classify_query(query) == "jira_project_status"
+    assert is_structured("jira_project_status")
+
+
+@pytest.mark.parametrize(
+    ("query", "expected"),
+    [
+        # A work noun with no quantifier is an ordinary topic question.
+        ("What is the status of ASK-6?", "jira_issue_status"),
+        ("Which issues are assigned to Manav?", "jira_assignee"),
+        # Blockers keep their own route; "open" alone must not capture them.
+        ("What blockers are open in AskBase?", "blocker_investigation"),
+        # A quantifier with no work noun is too vague to claim.
+        ("What work was done on the Slack connector?", "weekly_project_brief"),
+        ("Is everything done?", "weekly_project_brief"),
+    ],
+)
+def test_counting_route_does_not_swallow_neighbouring_intents(query: str, expected: str) -> None:
+    assert classify_query(query) == expected

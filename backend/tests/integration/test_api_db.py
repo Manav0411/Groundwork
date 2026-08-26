@@ -269,3 +269,75 @@ async def test_an_exact_commit_answer_is_graded_correct(session, project, client
     assert body["unresolved_gaps"] == []
     assert len(body["citations"]) == 1
     assert "f4a941f" in body["answer"]
+
+
+async def test_a_quantifier_question_is_counted_and_graded_correct(
+    session, project, client
+) -> None:
+    """The aggregate limitation, end to end through the HTTP surface.
+
+    Asserts the grade explicitly for the same reason the exact-commit test does: a new branch in a
+    structured node is exactly where `grade = "correct"` gets displaced, and content can look
+    perfect while the grade is wrong.
+    """
+    from datetime import UTC, datetime
+
+    from app.connectors.jira import JiraIssue, JiraUser
+    from app.db.models import ConnectorSyncState
+    from app.services.ingestion import jira_issue_documents
+
+    session.add(
+        ConnectorSyncState(
+            project_id="test-project",
+            source_type="jira",
+            status="succeeded",
+            last_succeeded_at=datetime.now(UTC),
+        )
+    )
+
+    def issue(key: str, status: str, category: str) -> JiraIssue:
+        user = JiraUser(display_name="Raghav Rao", account_id="acct-1", email=None)
+        return JiraIssue(
+            key=key,
+            summary=f"Summary for {key}",
+            description="Description text.",
+            status=status,
+            status_category=category,
+            priority="Medium",
+            issue_type="Task",
+            assignee=user,
+            reporter=user,
+            labels=[],
+            comments=[],
+            created_at="2026-07-01T09:00:00Z",
+            updated_at="2026-08-01T09:00:00Z",
+            url=f"https://acme.atlassian.net/browse/{key}",
+        )
+
+    await ingest_documents(
+        session,
+        jira_issue_documents(
+            "test-project",
+            [
+                issue("TEST-1", "Done", "done"),
+                issue("TEST-2", "In Progress", "indeterminate"),
+            ],
+        ),
+        None,
+    )
+    await session.commit()
+
+    response = await client.post(
+        "/query",
+        headers=HEADERS,
+        json={"query": "Are all the tasks complete?", "project_id": "test-project"},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["query_type"] == "jira_project_status"
+    assert body["retrieval_grade"] == "correct"
+    assert "1 of 2" in body["answer"]
+    assert "TEST-2" in body["answer"]
+    # The outstanding work is cited, so the count is auditable rather than asserted.
+    assert body["citations"]

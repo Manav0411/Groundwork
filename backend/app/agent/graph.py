@@ -33,7 +33,7 @@ def _route_after_plan(state: AgentState) -> str:
     query_type = state["query_type"]
     if query_type in {"latest_commit", "commit_detail"}:
         return "structured_github"
-    if query_type in {"jira_issue_status", "jira_assignee"}:
+    if query_type in {"jira_issue_status", "jira_assignee", "jira_project_status"}:
         return "structured_jira"
     # Blocker questions reach the Jira tool only when the project actually has Jira configured;
     # otherwise they are ordinary retrieval questions.
