@@ -9,7 +9,7 @@ decided by identifiers a regex reads more reliably than a model.
 
 import re
 
-from app.services.structured_github import extract_commit_author
+from app.services.structured_github import extract_commit_author, extract_commit_sha
 from app.services.structured_jira import extract_assignee, extract_issue_key
 
 QueryType = str
@@ -35,11 +35,17 @@ def classify_query(query: str) -> QueryType:
     if extract_assignee(query):
         return "jira_assignee"
 
-    # 3. Commit intent, which the structured GitHub tool can answer exactly.
+    # 3. A named commit hash is a question about that commit's content, not a request for the
+    #    newest one. The structured tool only answers "latest by author" and would otherwise reply
+    #    "I need an author name" to a question that already names the exact record it is about.
+    if COMMIT_PATTERN.search(query) and extract_commit_sha(query):
+        return "commit_detail"
+
+    # 4. Commit intent, which the structured GitHub tool can answer exactly.
     if COMMIT_PATTERN.search(query):
         return "latest_commit"
 
-    # 4. Topic categories below here all share the hybrid retrieval path; the distinction only
+    # 5. Topic categories below here all share the hybrid retrieval path; the distinction only
     #    labels the trace.
     if BLOCKER_PATTERN.search(query):
         return "blocker_investigation"
@@ -65,4 +71,9 @@ def describe_route(query_type: QueryType, query: str) -> str:
         author = extract_commit_author(query)
         detail = f" for author {author!r}" if author else " with no author named"
         return f"Matched commit intent{detail}; selected deterministic GitHub SQL."
+    if query_type == "commit_detail":
+        return (
+            f"Matched commit {extract_commit_sha(query)}; the question names one commit, so "
+            "selected hybrid retrieval over its indexed content."
+        )
     return f"Classified as {query_type}; selected hybrid full-text/vector retrieval."

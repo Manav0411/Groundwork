@@ -27,12 +27,28 @@ class LatestCommitLookup:
     stale: bool
 
 
+SHA_PATTERN = re.compile(r"\b[0-9a-f]{7,40}\b", re.IGNORECASE)
+
+
 def extract_commit_author(query: str) -> str | None:
     match = AUTHOR_PATTERN.search(query.strip())
     if not match:
         return None
     author = " ".join(match.group(1).split()).strip(" '\".?!,")
     return author or None
+
+
+def extract_commit_sha(query: str) -> str | None:
+    """A commit hash named directly in the question.
+
+    Requires at least one digit. Plenty of English words are pure hex — "defaced", "facade" — and
+    without that check a harmless sentence would be read as naming a commit.
+    """
+    for match in SHA_PATTERN.finditer(query):
+        candidate = match.group(0)
+        if any(character.isdigit() for character in candidate):
+            return candidate.lower()
+    return None
 
 
 def normalize_author_identity(author: str) -> str:

@@ -14,8 +14,10 @@ from app.agent.followup import (
     extract_identifiers,
     introduces_unknown_identifier,
     is_self_contained,
+    is_underspecified,
     needs_resolution,
     resolve_followup,
+    restates_an_earlier_turn,
 )
 from app.agent.routing import classify_query
 from app.models.schemas import ConversationTurn
@@ -33,12 +35,26 @@ def _live_eval_queries() -> list[str]:
 
 
 @pytest.mark.parametrize("query", _live_eval_queries())
-def test_no_live_eval_query_is_treated_as_a_follow_up(query: str) -> None:
-    """The release gate sends no conversation id, so the gate must never fire on any of it.
+async def test_no_live_eval_query_is_ever_rewritten(query: str) -> None:
+    """The release gate sends no conversation id, so nothing in it may reach a model rewrite.
 
-    Asserted rather than assumed: a gate that fires here would send a deterministic exact-answer
-    question through a model rewrite, and the 1.000 pass rate would start depending on the weather.
+    Asserted rather than assumed: a rewrite here would put a deterministic exact-answer question
+    through a model, and the 1.000 pass rate would start depending on the weather.
+
+    The guarantee is empty history, not the gate. Three eval cases — "What was the latest commit?"
+    and friends — legitimately *are* underspecified, and inside a conversation they should resolve
+    against whoever was being discussed. Standing alone they must instead reach the tool and be
+    told an author is required, which is what those cases assert.
     """
+    client = StubOllama({"query": "a rewrite that must never be produced"})
+
+    assert await resolve_followup(query, [], client) is None
+    assert client.prompts == [], "The model must not be consulted without history."
+
+
+@pytest.mark.parametrize("query", [q for q in _live_eval_queries() if "by " in q or "ASK-" in q])
+def test_eval_queries_naming_a_record_are_never_follow_ups(query: str) -> None:
+    """A question naming its own record is self-contained even mid-conversation."""
     assert needs_resolution(query) is False
 
 
@@ -77,6 +93,36 @@ def test_back_references_need_resolution(query: str) -> None:
 )
 def test_self_contained_questions_are_left_alone(query: str) -> None:
     assert needs_resolution(query) is False
+
+
+@pytest.mark.parametrize(
+    "query",
+    [
+        "what features did last commit changed?",
+        "What was the latest commit?",
+        "Show me the most recent commit",
+    ],
+)
+def test_a_commit_question_naming_no_author_is_underspecified(query: str) -> None:
+    """Routable is not answerable.
+
+    These reach the GitHub tool on the word "commit" and are then told an author is required.
+    Standing alone that is correct. In a conversation that already named whose commits are under
+    discussion, refusing instead of using what was just said is the bug live testing exposed.
+    """
+    assert is_underspecified(query) is True
+    assert needs_resolution(query) is True
+
+
+def test_a_commit_question_naming_its_author_is_not_underspecified() -> None:
+    assert is_underspecified("What was the last commit by Manav0411?") is False
+    assert needs_resolution("What was the last commit by Manav0411?") is False
+
+
+def test_a_broad_decision_question_is_not_underspecified() -> None:
+    """Decision and blocker questions take retrieval, which handles a broad question fine."""
+    assert is_underspecified("Which decisions were made about embeddings?") is False
+    assert is_underspecified("What blockers are open?") is False
 
 
 def test_assigned_to_without_a_name_is_not_self_contained() -> None:
@@ -178,6 +224,23 @@ async def test_resolution_rejects_a_rewrite_that_invents_a_ticket() -> None:
     client = StubOllama({"query": "Who is ASK-7 assigned to?"})
 
     assert await resolve_followup("Who is it assigned to?", _history(), client) is None
+
+
+async def test_resolution_rejects_a_rewrite_that_echoes_an_earlier_question() -> None:
+    """Live testing caught this: "What was it about?" came back as the previous question verbatim.
+
+    It passes every other check — it differs from the follow-up, and it introduces no new
+    identifier — while throwing away what was actually asked. The agent then confidently
+    re-answered the previous turn as though it were new.
+    """
+    client = StubOllama({"query": "What is the status of ASK-6?"})
+
+    assert await resolve_followup("What was it about?", _history(), client) is None
+
+
+def test_echo_detection_ignores_casing_and_punctuation() -> None:
+    assert restates_an_earlier_turn("what is the status of ask-6", _history()) is True
+    assert restates_an_earlier_turn("What was ASK-6 about?", _history()) is False
 
 
 async def test_resolution_without_history_does_not_call_the_model() -> None:

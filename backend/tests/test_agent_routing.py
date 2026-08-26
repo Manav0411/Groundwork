@@ -1,10 +1,12 @@
 import pytest
 
 from app.agent.graph import classify_query
+from app.agent.routing import is_structured
 from app.connectors.synthetic_workspace import (
     get_weekly_brief_evidence,
     is_synthetic_project,
 )
+from app.services.structured_github import extract_commit_sha
 
 
 @pytest.mark.parametrize(
@@ -59,3 +61,27 @@ def test_demo_brief_is_scoped_to_synthetic_projects() -> None:
     assert marker in source
     guard = source.split(marker, 1)[1].split("\n)", 1)[0]
     assert "is_synthetic_project" in guard
+
+
+def test_a_named_commit_hash_is_a_content_question_not_a_latest_lookup() -> None:
+    """The structured tool only answers "latest by author".
+
+    Live testing surfaced this through multi-turn: "what features did last commit changed?"
+    resolved to "What features did the commit f4a941f change?", which then routed to the GitHub
+    tool and was told an author was required — for a question already naming the exact record.
+    """
+    assert classify_query("What was commit f4a941f about?") == "commit_detail"
+    assert classify_query("What features did the commit f4a941f change?") == "commit_detail"
+    assert is_structured("commit_detail") is False
+
+
+def test_a_commit_question_without_a_hash_still_reaches_the_structured_tool() -> None:
+    """Guards the live eval cases that expect "I need an author name"."""
+    assert classify_query("What was the latest commit?") == "latest_commit"
+    assert classify_query("Show me the most recent commit in AskBase") == "latest_commit"
+
+
+def test_hex_looking_words_are_not_mistaken_for_commit_hashes() -> None:
+    """"defaced" is seven hex characters; requiring a digit is what separates it from a SHA."""
+    assert extract_commit_sha("the commit defaced the layout") is None
+    assert extract_commit_sha("commit f4a941f") == "f4a941f"
