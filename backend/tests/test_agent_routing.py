@@ -6,7 +6,7 @@ from app.connectors.synthetic_workspace import (
     get_weekly_brief_evidence,
     is_synthetic_project,
 )
-from app.services.structured_github import extract_commit_sha
+from app.services.structured_github import extract_commit_author, extract_commit_sha
 
 
 @pytest.mark.parametrize(
@@ -85,3 +85,12 @@ def test_hex_looking_words_are_not_mistaken_for_commit_hashes() -> None:
     """"defaced" is seven hex characters; requiring a digit is what separates it from a SHA."""
     assert extract_commit_sha("the commit defaced the layout") is None
     assert extract_commit_sha("commit f4a941f") == "f4a941f"
+
+
+def test_author_extraction_stops_at_a_positional_clause() -> None:
+    """"by Manav0411 before 4121d76?" once captured the whole tail as the author name."""
+    assert extract_commit_author("What was the commit by Manav0411 before 4121d76?") == "Manav0411"
+    assert extract_commit_author("the commit by Sarah Kim after abc1234") == "Sarah Kim"
+    # The clauses that already worked must keep working.
+    assert extract_commit_author("last commit by Manav0411 on project AskBase?") == "Manav0411"
+    assert extract_commit_author("What was the last commit by Manav Goel?") == "Manav Goel"

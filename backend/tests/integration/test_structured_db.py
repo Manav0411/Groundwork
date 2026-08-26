@@ -332,3 +332,91 @@ async def test_jira_metadata_survives_the_round_trip(session, project) -> None:
     assert issue.assignee == "Raghav Rao"
     assert issue.issue_type == "Task"
     assert issue.record.authority == 0.95
+
+
+async def test_commit_offset_returns_the_nth_newest_not_the_newest(session, project) -> None:
+    """The defect: "second-to-last commit by X" ran the same lookup as "last commit by X"."""
+    await _ingest_commits(
+        session,
+        [
+            _commit("newest", "Raghav Rao", login="raghav-dev", at="2026-08-20T09:00:00Z"),
+            _commit("middle", "Raghav Rao", login="raghav-dev", at="2026-08-10T09:00:00Z"),
+            _commit("oldest", "Raghav Rao", login="raghav-dev", at="2026-08-01T09:00:00Z"),
+        ],
+    )
+
+    async def sha_at(offset: int) -> str | None:
+        return (await latest_commit_by_author(session, "test-project", "Raghav Rao", offset)).sha
+
+    assert await sha_at(0) == "newest"
+    assert await sha_at(1) == "middle"
+    assert await sha_at(2) == "oldest"
+
+
+async def test_an_offset_past_the_history_refuses_rather_than_substituting(
+    session, project
+) -> None:
+    """Returning the newest commit for a position that does not exist is confidently wrong."""
+    await _ingest_commits(
+        session, [_commit("only", "Raghav Rao", login="raghav-dev", at="2026-08-20T09:00:00Z")]
+    )
+
+    lookup = await latest_commit_by_author(session, "test-project", "Raghav Rao", 3)
+
+    assert lookup.status == "out_of_range"
+    assert lookup.record is None
+    assert lookup.sha is None
+    assert lookup.available == 1
+
+
+async def test_offset_applies_to_a_partial_author_match_too(session, project) -> None:
+    await _ingest_commits(
+        session,
+        [
+            _commit("newest", "Raghav Rao", login="raghav-dev", at="2026-08-20T09:00:00Z"),
+            _commit("older", "Raghav Rao", login="raghav-rao", at="2026-08-01T09:00:00Z"),
+        ],
+    )
+
+    lookup = await latest_commit_by_author(session, "test-project", "raghav r", 1)
+
+    assert lookup.status == "found"
+    assert lookup.sha == "older"
+
+
+async def test_a_named_hash_anchors_the_count_instead_of_being_the_answer(
+    session, project
+) -> None:
+    """"What came before f4a941f?" counts from that commit, not from the top of the list."""
+    await _ingest_commits(
+        session,
+        [
+            _commit("aaa1111", "Raghav Rao", login="raghav-dev", at="2026-08-20T09:00:00Z"),
+            _commit("bbb2222", "Raghav Rao", login="raghav-dev", at="2026-08-10T09:00:00Z"),
+            _commit("ccc3333", "Raghav Rao", login="raghav-dev", at="2026-08-01T09:00:00Z"),
+        ],
+    )
+
+    lookup = await latest_commit_by_author(
+        session, "test-project", "Raghav Rao", 1, anchor_sha="bbb2222"
+    )
+
+    assert lookup.sha == "ccc3333"
+    # The absolute position, so the wording matches the list rather than the step from the anchor.
+    assert lookup.offset == 2
+
+
+async def test_an_unknown_anchor_refuses_rather_than_counting_from_the_top(
+    session, project
+) -> None:
+    """Otherwise "the commit before <unknown>" silently becomes "the commit before the newest"."""
+    await _ingest_commits(
+        session, [_commit("aaa1111", "Raghav Rao", login="raghav-dev", at="2026-08-20T09:00:00Z")]
+    )
+
+    lookup = await latest_commit_by_author(
+        session, "test-project", "Raghav Rao", 1, anchor_sha="deadbee1"
+    )
+
+    assert lookup.status == "not_found"
+    assert lookup.record is None

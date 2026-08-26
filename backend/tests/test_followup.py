@@ -11,6 +11,7 @@ from pathlib import Path
 import pytest
 
 from app.agent.followup import (
+    carry_forward_author,
     extract_identifiers,
     introduces_unknown_identifier,
     is_self_contained,
@@ -21,6 +22,7 @@ from app.agent.followup import (
 )
 from app.agent.routing import classify_query
 from app.models.schemas import ConversationTurn
+from app.services.structured_github import extract_commit_offset
 
 EVAL_DIR = Path(__file__).resolve().parents[1] / "evals"
 
@@ -274,3 +276,71 @@ async def test_chained_follow_ups_resolve_against_the_standalone_form() -> None:
     assert resolved == "When was ASK-6 last updated?"
     assert "Who is ASK-6 assigned to?" in client.prompts[0]
     assert "Who is it assigned to?" not in client.prompts[0]
+
+
+@pytest.mark.parametrize(
+    ("query", "expected"),
+    [
+        ("What was the last commit by X?", 0),
+        ("What was the latest commit?", 0),
+        ("What was the second-to-last commit?", 1),
+        ("What was the 2nd latest commit?", 1),
+        ("the commit before that", 1),
+        ("the previous commit", 1),
+        # A bare "before" counts only when a hash follows it.
+        ("What was the commit by X before 4121d76?", 1),
+        ("What changed before the release?", 0),
+        ("third-to-last commit", 2),
+        ("What was the 5th most recent commit?", 4),
+    ],
+)
+def test_commit_position_is_read_from_the_question(query: str, expected: int) -> None:
+    """Position is part of the question, so it has to be part of the query.
+
+    Before this, "second-to-last commit by X" ran the same lookup as "last commit by X" and
+    returned the newest one — a confidently wrong answer nothing distinguished from a right one.
+    """
+    assert extract_commit_offset(query) == expected
+
+
+def test_a_dropped_author_is_carried_forward_from_the_conversation() -> None:
+    """The model resolves the ordinal and loses the person; this puts the person back.
+
+    Deterministic by construction: it copies an author string that literally appeared in an earlier
+    question, so it cannot introduce someone the conversation never mentioned.
+    """
+    history = [
+        ConversationTurn(
+            query="What was the last commit by Manav0411?",
+            answer="The latest indexed commit by Manav Goel is `f4a941f`.",
+            retrieval_grade="correct",
+        )
+    ]
+
+    carried = carry_forward_author("What was the second-to-last commit?", history)
+
+    assert carried == "What was the second-to-last commit by Manav0411?"
+
+
+def test_carry_forward_never_overrides_an_author_already_named() -> None:
+    history = [
+        ConversationTurn(
+            query="What was the last commit by Manav0411?",
+            answer="...",
+            retrieval_grade="correct",
+        )
+    ]
+
+    assert carry_forward_author("What was the last commit by Sarah Kim?", history) is None
+
+
+def test_carry_forward_ignores_questions_that_are_not_about_commits() -> None:
+    history = [
+        ConversationTurn(
+            query="What was the last commit by Manav0411?",
+            answer="...",
+            retrieval_grade="correct",
+        )
+    ]
+
+    assert carry_forward_author("What is the status of ASK-6?", history) is None

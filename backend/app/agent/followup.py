@@ -149,6 +149,27 @@ def introduces_unknown_identifier(rewritten: str, sources: list[str]) -> bool:
     return bool(extract_identifiers(rewritten) - known)
 
 
+def carry_forward_author(query: str, history: list[ConversationTurn]) -> str | None:
+    """Re-attach the commit author the conversation already established, if the rewrite lost it.
+
+    A small model resolving "And what was last second commit?" reliably gets the ordinal right and
+    drops the person: it returns "What was the second-to-last commit?", which routes to the GitHub
+    tool with no author and can only ask for one — in a conversation that named the author a moment
+    earlier.
+
+    This is deterministic and cannot invent anything: it copies an author string that literally
+    appeared in an earlier question. It fires only when the question needs an author and has none,
+    which is why it cannot override a rewrite that got the person right.
+    """
+    if not COMMIT_PATTERN.search(query) or extract_commit_author(query):
+        return None
+    for turn in reversed(history):
+        author = extract_commit_author(turn.resolved_query or turn.query)
+        if author:
+            return f"{query.strip().rstrip('?.! ')} by {author}?"
+    return None
+
+
 def _normalize(text: str) -> str:
     return " ".join(text.casefold().split()).strip(" ?.!")
 

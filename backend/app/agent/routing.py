@@ -9,7 +9,11 @@ decided by identifiers a regex reads more reliably than a model.
 
 import re
 
-from app.services.structured_github import extract_commit_author, extract_commit_sha
+from app.services.structured_github import (
+    extract_commit_author,
+    extract_commit_offset,
+    extract_commit_sha,
+)
 from app.services.structured_jira import extract_assignee, extract_issue_key
 
 QueryType = str
@@ -38,8 +42,12 @@ def classify_query(query: str) -> QueryType:
     # 3. A named commit hash is a question about that commit's content, not a request for the
     #    newest one. The structured tool only answers "latest by author" and would otherwise reply
     #    "I need an author name" to a question that already names the exact record it is about.
+    #
+    #    Unless the question is positional. "What came before f4a941f?" names a hash but asks for a
+    #    different commit, so it belongs on the ordered lookup with that hash as its anchor.
     if COMMIT_PATTERN.search(query) and extract_commit_sha(query):
-        return "commit_detail"
+        if extract_commit_offset(query) == 0:
+            return "commit_detail"
 
     # 4. Commit intent, which the structured GitHub tool can answer exactly.
     if COMMIT_PATTERN.search(query):

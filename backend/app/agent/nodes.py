@@ -5,7 +5,7 @@ answer paths previously duplicated the guardrail, planner, and citation-validati
 share those nodes and differ only in how evidence is gathered.
 """
 
-from app.agent.followup import needs_resolution, resolve_followup
+from app.agent.followup import carry_forward_author, needs_resolution, resolve_followup
 from app.agent.routing import classify_query, describe_route
 from app.agent.state import AgentState
 from app.connectors.synthetic_workspace import get_weekly_brief_evidence, is_synthetic_project
@@ -21,7 +21,13 @@ from app.services.llm import (
     fallback_weekly_brief_answer,
 )
 from app.services.retrieval import hybrid_retrieve, records_to_response
-from app.services.structured_github import extract_commit_author, latest_commit_by_author
+from app.services.structured_github import (
+    describe_offset,
+    extract_commit_author,
+    extract_commit_offset,
+    extract_commit_sha,
+    latest_commit_by_author,
+)
 from app.services.structured_jira import (
     extract_assignee,
     extract_issue_key,
@@ -69,7 +75,14 @@ async def resolve(state: AgentState) -> AgentState:
             step.summary = "Question is self-contained; skipped resolution."
         else:
             resolved = await resolve_followup(request.query, history)
-            if resolved is None:
+            # The model reliably resolves the ordinal and drops the person. Re-attaching an author
+            # the conversation already named is deterministic and cannot invent one, so it runs
+            # whether or not the rewrite itself succeeded.
+            carried = carry_forward_author(resolved or request.query, history)
+            if carried is not None:
+                step.summary = f"Carried the author forward; resolved to: {carried!r}"
+                resolved = carried
+            elif resolved is None:
                 # Covers three cases the caller does not need to distinguish: the model was
                 # unavailable, it returned something unusable, or the identifier guard rejected it.
                 step.summary = (
@@ -118,7 +131,16 @@ async def structured_github(state: AgentState) -> AgentState:
             step.summary = "Could not extract a commit author from the question."
             gaps.append("Commit author was not specified using a recognizable form.")
         else:
-            lookup = await latest_commit_by_author(session, request.project_id, author)  # type: ignore[arg-type]
+            offset = extract_commit_offset(request.query)
+            # A hash in a positional question anchors the count rather than naming the answer.
+            anchor = extract_commit_sha(request.query) if offset else None
+            lookup = await latest_commit_by_author(
+                session,  # type: ignore[arg-type]
+                request.project_id,
+                author,
+                offset,
+                anchor,
+            )
             if lookup.status == "found" and lookup.record is not None:
                 records = [lookup.record]
                 short_sha = (lookup.sha or "unknown")[:7]
@@ -128,17 +150,30 @@ async def structured_github(state: AgentState) -> AgentState:
                     else "an unknown time"
                 )
                 answer = (
-                    f"The latest indexed commit by {lookup.author or author} is `{short_sha}` — "
-                    f"“{lookup.record.title}”, committed at {committed_at} [1]."
+                    f"The {describe_offset(lookup.offset)} indexed commit by "
+                    f"{lookup.author or author} is `{short_sha}` — “{lookup.record.title}”, "
+                    f"committed at {committed_at} [1]."
                 )
                 step.summary = (
-                    f"Found the latest commit by exact author identity and timestamp for {author}."
+                    f"Found the {describe_offset(lookup.offset)} commit by exact author identity "
+                    f"and timestamp for {author}."
                 )
                 grade = "correct"
                 if lookup.stale:
                     grade = "ambiguous"
                     synced = lookup.last_synced_at.isoformat() if lookup.last_synced_at else "never"
                     gaps.append(f"GitHub data may be stale; last successful sync: {synced}.")
+            elif lookup.status == "out_of_range":
+                position = lookup.offset + 1
+                answer = (
+                    f"{lookup.author or author} has only {lookup.available} indexed commit(s) in "
+                    f"{request.project_id}, so there is no {position}th most recent one."
+                )
+                step.summary = "Requested commit position is beyond this author's indexed history."
+                gaps.append(
+                    f"Only {lookup.available} commit(s) are indexed for this author; "
+                    f"position {position} was requested."
+                )
             elif lookup.status == "ambiguous":
                 answer = (
                     f"The author name {author!r} is ambiguous. "
