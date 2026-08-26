@@ -17,6 +17,7 @@ from app.agent.followup import (
     is_self_contained,
     is_underspecified,
     needs_resolution,
+    rebuild_positional_question,
     resolve_followup,
     restates_an_earlier_turn,
 )
@@ -344,3 +345,126 @@ def test_carry_forward_ignores_questions_that_are_not_about_commits() -> None:
     ]
 
     assert carry_forward_author("What is the status of ASK-6?", history) is None
+
+
+@pytest.mark.parametrize(
+    ("query", "expected"),
+    [
+        ("What was the 50th commit by Manav0411?", 49),
+        ("show me the 3rd latest one", 2),
+        ("what did the previous one do?", 1),
+        ("the 10th most recent commit", 9),
+        ("the sixth latest commit", 5),
+        ("the first commit", 0),
+    ],
+)
+def test_numeric_and_extended_ordinals_are_read(query: str, expected: int) -> None:
+    """"the 50th commit" was read as offset 0 and answered with the newest commit.
+
+    Every field of that answer was well-formed. Only the position was wrong, which is the failure
+    mode this whole path exists to prevent, so the word list is not enough on its own.
+    """
+    assert extract_commit_offset(query) == expected
+
+
+@pytest.mark.parametrize(
+    "query",
+    ["show me the 3rd latest one", "what did the previous one do?", "the 50th one"],
+)
+def test_a_positional_question_without_the_word_commit_still_needs_resolution(query: str) -> None:
+    """These name no record and never say "commit", so nothing else in the gate caught them."""
+    assert needs_resolution(query) is True
+
+
+def test_a_positional_question_is_rebuilt_without_the_model() -> None:
+    """Position and author are both recoverable from the question and the conversation.
+
+    The model loses each of them readily — "show me the 3rd latest one" came back as
+    "What was commit f4a941f about?", dropping the position and confidently answering about the
+    newest commit. Reconstructing directly is exact and skips the inference call entirely.
+    """
+    history = [
+        ConversationTurn(
+            query="What was the last commit by Manav0411?",
+            answer="The latest indexed commit by Manav Goel is `f4a941f`.",
+            retrieval_grade="correct",
+        )
+    ]
+
+    rebuilt = rebuild_positional_question("show me the 3rd latest one", history)
+
+    assert rebuilt == "What was the third most recent commit by Manav0411?"
+    # The rebuilt form must round-trip back through the extractors it will be routed by.
+    assert extract_commit_offset(rebuilt) == 2
+    assert classify_query(rebuilt) == "latest_commit"
+
+
+def test_rebuild_declines_when_the_question_is_not_positional() -> None:
+    history = [
+        ConversationTurn(
+            query="What was the last commit by Manav0411?", answer="...", retrieval_grade="correct"
+        )
+    ]
+
+    assert rebuild_positional_question("what was it about?", history) is None
+
+
+def test_rebuild_declines_when_no_author_was_ever_named() -> None:
+    """Without an author there is nothing deterministic to rebuild from; the model gets it."""
+    history = [
+        ConversationTurn(
+            query="What blockers are open?", answer="ASK-6 is blocked.", retrieval_grade="correct"
+        )
+    ]
+
+    assert rebuild_positional_question("show me the 3rd latest one", history) is None
+
+
+def test_absolute_and_relative_positions_are_not_conflated() -> None:
+    """Conflating them walks the wrong way through history.
+
+    "the 3rd latest one" counts from the newest commit. "the one before that" counts from whichever
+    commit the conversation last named — which is what makes asking it repeatedly step backwards
+    one commit at a time instead of returning to the same one.
+    """
+    first = ConversationTurn(
+        query="What was the last commit by Manav0411?",
+        answer="The latest indexed commit by Manav Goel is `f4a941f` - Refactor README.",
+        retrieval_grade="correct",
+    )
+    second = ConversationTurn(
+        query="And what was last second commit?",
+        resolved_query="What was the second most recent commit by Manav0411?",
+        answer="The second most recent indexed commit is `4121d76` - Remove code.",
+        retrieval_grade="correct",
+    )
+
+    assert (
+        rebuild_positional_question("show me the 3rd latest one", [first])
+        == "What was the third most recent commit by Manav0411?"
+    )
+    assert (
+        rebuild_positional_question("and the one before that?", [first])
+        == "What was the commit by Manav0411 before f4a941f?"
+    )
+    # Asked again a turn later, it must anchor on the newer answer and step back once more.
+    assert (
+        rebuild_positional_question("and the one before that?", [first, second])
+        == "What was the commit by Manav0411 before 4121d76?"
+    )
+
+
+def test_relative_position_falls_back_to_absolute_without_a_hash() -> None:
+    """Nothing to anchor on means counting from the newest, which is the best available reading."""
+    history = [
+        ConversationTurn(
+            query="What was the last commit by Manav0411?",
+            answer="No hash in this answer.",
+            retrieval_grade="correct",
+        )
+    ]
+
+    assert (
+        rebuild_positional_question("the previous one", history)
+        == "What was the second most recent commit by Manav0411?"
+    )

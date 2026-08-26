@@ -63,7 +63,7 @@ def classify_query(query: str) -> QueryType:
 
 
 def is_structured(query_type: QueryType) -> bool:
-    return query_type in {"latest_commit", "jira_issue_status", "jira_assignee"}
+    return query_type in {"latest_commit", "commit_detail", "jira_issue_status", "jira_assignee"}
 
 
 def describe_route(query_type: QueryType, query: str) -> str:
@@ -81,7 +81,7 @@ def describe_route(query_type: QueryType, query: str) -> str:
         return f"Matched commit intent{detail}; selected deterministic GitHub SQL."
     if query_type == "commit_detail":
         return (
-            f"Matched commit {extract_commit_sha(query)}; the question names one commit, so "
-            "selected hybrid retrieval over its indexed content."
+            f"Matched commit {extract_commit_sha(query)}; the question names one record, so "
+            "selected deterministic GitHub SQL."
         )
     return f"Classified as {query_type}; selected hybrid full-text/vector retrieval."

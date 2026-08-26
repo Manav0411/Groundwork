@@ -31,7 +31,7 @@ __all__ = ["AGENT_GRAPH", "build_graph", "classify_query", "run_agent"]
 
 def _route_after_plan(state: AgentState) -> str:
     query_type = state["query_type"]
-    if query_type == "latest_commit":
+    if query_type in {"latest_commit", "commit_detail"}:
         return "structured_github"
     if query_type in {"jira_issue_status", "jira_assignee"}:
         return "structured_jira"

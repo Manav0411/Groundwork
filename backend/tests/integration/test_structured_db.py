@@ -18,7 +18,7 @@ from app.services.ingestion import (
     ingest_documents,
     jira_issue_documents,
 )
-from app.services.structured_github import latest_commit_by_author
+from app.services.structured_github import commit_by_sha, latest_commit_by_author
 from app.services.structured_jira import (
     jira_issue_by_key,
     jira_issues_by_assignee,
@@ -420,3 +420,42 @@ async def test_an_unknown_anchor_refuses_rather_than_counting_from_the_top(
 
     assert lookup.status == "not_found"
     assert lookup.record is None
+
+
+async def test_a_commit_is_found_by_hash_prefix(session, project) -> None:
+    """The path that previously went through a 3B model and got contradicted by its own evidence."""
+    await _ingest_commits(
+        session,
+        [_commit("f4a941f777055b", "Manav Goel", login="Manav0411", at="2026-05-11T14:38:59Z")],
+    )
+
+    lookup = await commit_by_sha(session, "test-project", "f4a941f")
+
+    assert lookup.status == "found"
+    assert lookup.author == "Manav Goel"
+    assert lookup.record is not None
+    assert lookup.record.source_timestamp is not None
+
+
+async def test_an_ambiguous_hash_prefix_refuses(session, project) -> None:
+    """Two commits sharing a prefix must not resolve to whichever happens to sort first."""
+    await _ingest_commits(
+        session,
+        [
+            _commit("abc1234aaa", "Manav Goel", login="Manav0411", at="2026-05-11T14:38:59Z"),
+            _commit("abc1234bbb", "Manav Goel", login="Manav0411", at="2026-05-10T14:38:59Z"),
+        ],
+    )
+
+    lookup = await commit_by_sha(session, "test-project", "abc1234")
+
+    assert lookup.status == "ambiguous"
+    assert lookup.record is None
+
+
+async def test_an_unknown_hash_is_not_found(session, project) -> None:
+    await _ingest_commits(
+        session, [_commit("aaa1111", "Manav Goel", login="Manav0411", at="2026-05-11T14:38:59Z")]
+    )
+
+    assert (await commit_by_sha(session, "test-project", "deadbee1")).status == "not_found"

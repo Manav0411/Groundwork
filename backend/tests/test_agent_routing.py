@@ -63,16 +63,17 @@ def test_demo_brief_is_scoped_to_synthetic_projects() -> None:
     assert "is_synthetic_project" in guard
 
 
-def test_a_named_commit_hash_is_a_content_question_not_a_latest_lookup() -> None:
-    """The structured tool only answers "latest by author".
+def test_a_named_commit_hash_gets_its_own_exact_lookup() -> None:
+    """A question naming one record has an exact answer, so it must not be summarized.
 
-    Live testing surfaced this through multi-turn: "what features did last commit changed?"
-    resolved to "What features did the commit f4a941f change?", which then routed to the GitHub
-    tool and was told an author was required — for a question already naming the exact record.
+    This routed to retrieval first, as a quick fix for "what features did the commit f4a941f
+    change?" being told an author was required. Retrieval was the wrong destination: it found the
+    right commit and the 3B model then answered "I couldn't find any information about commit
+    f4a941f" — contradicting the evidence in position one. It is a structured path now.
     """
     assert classify_query("What was commit f4a941f about?") == "commit_detail"
     assert classify_query("What features did the commit f4a941f change?") == "commit_detail"
-    assert is_structured("commit_detail") is False
+    assert is_structured("commit_detail") is True
 
 
 def test_a_commit_question_without_a_hash_still_reaches_the_structured_tool() -> None:

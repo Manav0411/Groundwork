@@ -5,7 +5,12 @@ answer paths previously duplicated the guardrail, planner, and citation-validati
 share those nodes and differ only in how evidence is gathered.
 """
 
-from app.agent.followup import carry_forward_author, needs_resolution, resolve_followup
+from app.agent.followup import (
+    carry_forward_author,
+    needs_resolution,
+    rebuild_positional_question,
+    resolve_followup,
+)
 from app.agent.routing import classify_query, describe_route
 from app.agent.state import AgentState
 from app.connectors.synthetic_workspace import get_weekly_brief_evidence, is_synthetic_project
@@ -22,6 +27,7 @@ from app.services.llm import (
 )
 from app.services.retrieval import hybrid_retrieve, records_to_response
 from app.services.structured_github import (
+    commit_by_sha,
     describe_offset,
     extract_commit_author,
     extract_commit_offset,
@@ -73,6 +79,11 @@ async def resolve(state: AgentState) -> AgentState:
             step.summary = "First turn in the conversation; nothing to resolve against."
         elif not needs_resolution(request.query):
             step.summary = "Question is self-contained; skipped resolution."
+        elif (rebuilt := rebuild_positional_question(request.query, history)) is not None:
+            # Position and author are both recoverable without a model, and the model drops each of
+            # them readily. Reconstructing directly is exact and skips a ~6s inference call.
+            resolved = rebuilt
+            step.summary = f"Rebuilt the positional question deterministically as: {rebuilt!r}"
         else:
             resolved = await resolve_followup(request.query, history)
             # The model reliably resolves the ordinal and drops the person. Re-attaching an author
@@ -119,6 +130,11 @@ async def structured_github(state: AgentState) -> AgentState:
 
     with state["trace"].step("Structured GitHub Query") as step:
         author = extract_commit_author(request.query)
+        named_sha = (
+            extract_commit_sha(request.query)
+            if state["query_type"] == "commit_detail"
+            else None
+        )
         if not state["project_exists"]:
             answer = (
                 f"Project {request.project_id!r} is not onboarded. Create the project and run a "
@@ -126,6 +142,40 @@ async def structured_github(state: AgentState) -> AgentState:
             )
             step.summary = "Project is not available in PostgreSQL."
             gaps.append("Project has not been onboarded or the database is unavailable.")
+        elif named_sha is not None:
+            lookup = await commit_by_sha(session, request.project_id, named_sha)  # type: ignore[arg-type]
+            if lookup.status == "found" and lookup.record is not None:
+                records = [lookup.record]
+                committed_at = (
+                    lookup.record.source_timestamp.isoformat()
+                    if lookup.record.source_timestamp
+                    else "an unknown time"
+                )
+                commit_author = lookup.author or "an unknown author"
+                answer = (
+                    f"Commit `{(lookup.sha or named_sha)[:7]}` by {commit_author} — "
+                    f"“{lookup.record.title}”, committed at {committed_at} [1]."
+                )
+                step.summary = f"Resolved commit {named_sha} by exact hash."
+                grade = "correct"
+                if lookup.stale:
+                    grade = "ambiguous"
+                    synced = lookup.last_synced_at.isoformat() if lookup.last_synced_at else "never"
+                    gaps.append(f"GitHub data may be stale; last successful sync: {synced}.")
+            elif lookup.status == "ambiguous":
+                answer = (
+                    f"The hash {named_sha!r} matches more than one indexed commit: "
+                    f"{', '.join(lookup.candidates)}. Use more characters of the hash."
+                )
+                step.summary = "Commit hash prefix matched multiple commits."
+                gaps.append("A longer commit hash is required to identify one commit.")
+            else:
+                answer = (
+                    f"No indexed commit in {request.project_id} has the hash {named_sha!r}. "
+                    "Run a GitHub sync, or check the hash."
+                )
+                step.summary = "No indexed commit matched the hash."
+                gaps.append("No commit with that hash exists in the currently indexed history.")
         elif author is None:
             answer = "I need an author name, for example: 'What was the last commit by Raghav?'"
             step.summary = "Could not extract a commit author from the question."

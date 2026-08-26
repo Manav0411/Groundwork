@@ -37,20 +37,25 @@ class LatestCommitLookup:
 
 SHA_PATTERN = re.compile(r"\b[0-9a-f]{7,40}\b", re.IGNORECASE)
 
-# "second-to-last", "2nd last", "second most recent", "one before that".
+# "second-to-last", "3rd latest one", "the 50th commit", "one before that".
 ORDINAL_WORDS = {
+    "first": 0,
     "second": 1,
-    "2nd": 1,
     "third": 2,
-    "3rd": 2,
     "fourth": 3,
-    "4th": 3,
     "fifth": 4,
-    "5th": 4,
+    "sixth": 5,
+    "seventh": 6,
+    "eighth": 7,
+    "ninth": 8,
+    "tenth": 9,
 }
+# The numeric branch matters as much as the words: "the 50th commit" was read as offset 0 and
+# answered with the newest commit — the confidently wrong answer this whole path exists to avoid.
 ORDINAL_PATTERN = re.compile(
-    r"\b(second|2nd|third|3rd|fourth|4th|fifth|5th)[\s-]*(?:to[\s-]*)?"
-    r"(?:last|latest|most\s+recent|newest)\b",
+    r"\b(?:the\s+)?(?:(\d{1,3})(?:st|nd|rd|th)|"
+    r"(first|second|third|fourth|fifth|sixth|seventh|eighth|ninth|tenth))"
+    r"[\s-]*(?:to[\s-]*)?(?:last|latest|most\s+recent|newest|commit|one)\b",
     re.IGNORECASE,
 )
 PREVIOUS_PATTERN = re.compile(
@@ -59,7 +64,7 @@ PREVIOUS_PATTERN = re.compile(
     r"\b(?:previous|prior|one\s+before|before\s+that|preceding|before\s+(?=[0-9a-f]{7,40}\b))",
     re.IGNORECASE,
 )
-MAX_COMMIT_OFFSET = 20
+MAX_COMMIT_OFFSET = 99
 
 
 def extract_commit_author(query: str) -> str | None:
@@ -92,7 +97,11 @@ def extract_commit_offset(query: str) -> int:
     """
     match = ORDINAL_PATTERN.search(query)
     if match:
-        return ORDINAL_WORDS[match.group(1).casefold()]
+        numeric, word = match.group(1), match.group(2)
+        # An out-of-range position is answered by refusing, not by clamping into a real commit.
+        if numeric is not None:
+            return min(max(int(numeric) - 1, 0), MAX_COMMIT_OFFSET)
+        return ORDINAL_WORDS[word.casefold()]
     if PREVIOUS_PATTERN.search(query):
         return 1
     return 0
@@ -292,4 +301,55 @@ async def latest_commit_by_author(
         candidates=candidates,
         last_synced_at=last_synced_at,
         stale=stale,
+    )
+
+
+async def commit_by_sha(session: AsyncSession, project_id: str, sha: str) -> LatestCommitLookup:
+    """Look up one commit by hash, exactly.
+
+    This path used to go through retrieval and a 3B model, which retrieved the right commit and
+    then answered "I couldn't find any information about commit f4a941f" — contradicting the
+    evidence sitting in position one. A question that names a record has an exact answer, so it
+    gets the same deterministic treatment as every other exact question here.
+    """
+    last_synced_at, stale = await _sync_freshness(session, project_id)
+    rows = (
+        await session.execute(
+            select(SourceDocument, DocumentChunk)
+            .join(
+                DocumentChunk,
+                (DocumentChunk.document_id == SourceDocument.id)
+                & (DocumentChunk.chunk_index == 0),
+            )
+            .where(
+                SourceDocument.project_id == project_id,
+                SourceDocument.source_type == "github",
+                SourceDocument.external_id.ilike(f"{sha}%"),
+            )
+            .limit(2)
+        )
+    ).all()
+    if len(rows) != 1:
+        return LatestCommitLookup(
+            status="ambiguous" if len(rows) > 1 else "not_found",
+            author_query=None,
+            record=None,
+            sha=None,
+            author=None,
+            candidates=[str(row.SourceDocument.external_id)[:7] for row in rows],
+            last_synced_at=last_synced_at,
+            stale=stale,
+        )
+    row = rows[0]
+    document = row.SourceDocument
+    return LatestCommitLookup(
+        status="found",
+        author_query=None,
+        record=_record_from_row(row),
+        sha=str(document.source_metadata.get("sha") or document.external_id),
+        author=document.author,
+        candidates=[],
+        last_synced_at=last_synced_at,
+        stale=stale,
+        available=1,
     )

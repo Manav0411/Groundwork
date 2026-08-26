@@ -27,7 +27,14 @@ from app.agent.routing import BLOCKER_PATTERN, COMMIT_PATTERN, DECISION_PATTERN
 from app.core.config import settings
 from app.models.schemas import ConversationTurn
 from app.services.llm import OllamaClient
-from app.services.structured_github import extract_commit_author, extract_commit_sha
+from app.services.structured_github import (
+    ORDINAL_PATTERN,
+    PREVIOUS_PATTERN,
+    describe_offset,
+    extract_commit_author,
+    extract_commit_offset,
+    extract_commit_sha,
+)
 from app.services.structured_jira import ISSUE_KEY_PATTERN, extract_assignee, extract_issue_key
 
 # Personal pronouns only. Bare "this"/"that" is deliberately excluded: "what deployment work was
@@ -56,15 +63,21 @@ BARE_WHY_MAX_WORDS = 4
 # SHAs are the other identifier a rewrite could corrupt.
 SHA_PATTERN = re.compile(r"\b[0-9a-f]{7,40}\b", re.IGNORECASE)
 
+# Measured, not guessed. The previous wording leaned so hard on "never return an earlier question"
+# — added to stop the model echoing turn 1 — that a 3B model stopped substituting at all and
+# returned the follow-up verbatim: 0/5 on a Jira assignee follow-up. Leading with the positive
+# instruction and giving one example per source restored 5/5 without bringing the echo back.
 RESOLUTION_SYSTEM_PROMPT = (
-    "You rewrite a follow-up question into a standalone question. Use the earlier conversation "
-    "only to replace pronouns and fill in the subject that was left out. "
-    "The follow-up asks something NEW: keep exactly what it asks for, and never answer it or "
-    "return an earlier question. "
+    "You rewrite a follow-up question so it makes sense on its own. Replace every pronoun with the "
+    "specific thing it refers to in the earlier conversation. The result must contain no pronouns "
+    "and must still ask exactly what the follow-up asked — do not answer it, and do not replace it "
+    "with an earlier question. "
     "Never introduce an issue key, commit hash, or person absent from the conversation. "
-    "Example — earlier: 'What was the last commit by Alex?' answered 'abc1234 — Fix login retry'. "
-    "Follow-up: 'What was it about?' becomes 'What was commit abc1234 about?', "
-    "NOT 'What was the last commit by Alex?'. "
+    "Example 1 — earlier: 'What is the status of ABC-1?'. "
+    "Follow-up 'who is it assigned to?' becomes 'Who is ABC-1 assigned to?'. "
+    "Example 2 — earlier: 'What was the last commit by Alex?' answered 'abc1234 - Fix login'. "
+    "Follow-up 'What was it about?' becomes 'What was commit abc1234 about?' "
+    "(not 'What was the last commit by Alex?'). "
     'Reply with JSON only: {"query": "<standalone question>"}'
 )
 
@@ -97,6 +110,11 @@ def is_underspecified(query: str) -> bool:
     """
     if names_a_record(query):
         return False
+    # A positional question is relative by construction: "the 3rd latest one" and "the previous
+    # one" name no record and do not even contain the word "commit", so nothing else here caught
+    # them and they fell through to retrieval.
+    if extract_commit_offset(query):
+        return True
     if COMMIT_PATTERN.search(query):
         return True
     # Blocker and decision questions take the retrieval path, which handles a broad question fine.
@@ -149,6 +167,59 @@ def introduces_unknown_identifier(rewritten: str, sources: list[str]) -> bool:
     return bool(extract_identifiers(rewritten) - known)
 
 
+def rebuild_positional_question(query: str, history: list[ConversationTurn]) -> str | None:
+    """Rewrite a positional commit question deterministically, without consulting the model.
+
+    Position and author are the two things a rewrite must not lose, and the model loses each of
+    them readily: "show me the 3rd latest one" came back as "What was commit f4a941f about?",
+    dropping the position and confidently answering about the newest commit instead.
+
+    Both values are recoverable without a model — the ordinal is in the question, the author is in
+    the conversation — so this reconstructs the standalone form directly. It is faster, exact, and
+    cannot lose either attribute. Returns None when the question is not positional or no author was
+    ever named, leaving those cases to the model.
+    """
+    offset = extract_commit_offset(query)
+    if not offset:
+        return None
+    author = extract_commit_author(query) or _author_from_history(history)
+    if not author:
+        return None
+
+    # Two kinds of position, and conflating them walks the wrong way through history.
+    # "the 3rd latest one" is absolute: count from the newest commit.
+    # "the one before that" is relative: count from whichever commit the conversation last named,
+    # which is what makes asking it repeatedly step backwards one commit at a time.
+    if is_relative_position(query):
+        anchor = _sha_from_history(history)
+        if anchor:
+            return f"What was the commit by {author} before {anchor}?"
+    return f"What was the {describe_offset(offset)} commit by {author}?"
+
+
+def is_relative_position(query: str) -> bool:
+    """True for "the previous one" / "the one before that", false for "the 3rd latest one"."""
+    return bool(PREVIOUS_PATTERN.search(query)) and not ORDINAL_PATTERN.search(query)
+
+
+def _sha_from_history(history: list[ConversationTurn]) -> str | None:
+    """The most recent commit hash the conversation actually named, from a question or an answer."""
+    for turn in reversed(history):
+        for text in (turn.answer, turn.resolved_query or turn.query):
+            sha = extract_commit_sha(text)
+            if sha:
+                return sha
+    return None
+
+
+def _author_from_history(history: list[ConversationTurn]) -> str | None:
+    for turn in reversed(history):
+        author = extract_commit_author(turn.resolved_query or turn.query)
+        if author:
+            return author
+    return None
+
+
 def carry_forward_author(query: str, history: list[ConversationTurn]) -> str | None:
     """Re-attach the commit author the conversation already established, if the rewrite lost it.
 
@@ -163,11 +234,10 @@ def carry_forward_author(query: str, history: list[ConversationTurn]) -> str | N
     """
     if not COMMIT_PATTERN.search(query) or extract_commit_author(query):
         return None
-    for turn in reversed(history):
-        author = extract_commit_author(turn.resolved_query or turn.query)
-        if author:
-            return f"{query.strip().rstrip('?.! ')} by {author}?"
-    return None
+    author = _author_from_history(history)
+    if author is None:
+        return None
+    return f"{query.strip().rstrip('?.! ')} by {author}?"
 
 
 def _normalize(text: str) -> str:
