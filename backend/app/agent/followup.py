@@ -23,7 +23,12 @@ back to the original question, and the trace records which happened.
 
 import re
 
-from app.agent.routing import BLOCKER_PATTERN, COMMIT_PATTERN, DECISION_PATTERN
+from app.agent.routing import (
+    BLOCKER_PATTERN,
+    COMMIT_PATTERN,
+    DECISION_PATTERN,
+    LATEST_PATTERN,
+)
 from app.core.config import settings
 from app.models.schemas import ConversationTurn
 from app.services.citations import CITATION_MARKER
@@ -55,6 +60,15 @@ DEMONSTRATIVE_PATTERN = re.compile(
 # that?". Requiring the end of the clause is what keeps "what shipped **this** week" out.
 DANGLING_DEMONSTRATIVE_PATTERN = re.compile(
     r"\b(?:that|this|those|these)\s*[?.!]*\s*$", re.IGNORECASE
+)
+
+# A demonstrative followed by a verb is a pronoun, not a determiner: "which channel was **that**
+# discussed in?" points backwards, while "**that** ticket" does not. Keeping this to an explicit
+# verb list is what stops it swallowing ordinary determiner use.
+DEMONSTRATIVE_PRONOUN_PATTERN = re.compile(
+    r"\b(?:that|this|those|these)\s+"
+    r"(?:was|were|is|are|got|had|has|happened|discussed|decided|said|mentioned|come|came)\b",
+    re.IGNORECASE,
 )
 
 # Openers that are follow-ups regardless of length: they continue a sentence rather than start one.
@@ -122,7 +136,9 @@ def is_underspecified(query: str) -> bool:
     # them and they fell through to retrieval.
     if extract_commit_offset(query):
         return True
-    if COMMIT_PATTERN.search(query):
+    # Only a commit question the structured tool could answer *if it had the author*. A content
+    # question ("which commit dropped X?") is answered by retrieval and needs no resolution.
+    if COMMIT_PATTERN.search(query) and LATEST_PATTERN.search(query):
         return True
     # Blocker and decision questions take the retrieval path, which handles a broad question fine.
     # Only a back-reference makes them dependent on the conversation.
@@ -144,7 +160,7 @@ def needs_resolution(query: str) -> bool:
     # Checked before `names_a_record`, because naming one record does not resolve a *different*
     # dangling reference: "What was the reply by Manav on that?" names Manav and still leaves
     # "that" pointing at whatever the previous turn was about.
-    if DANGLING_DEMONSTRATIVE_PATTERN.search(text):
+    if DANGLING_DEMONSTRATIVE_PATTERN.search(text) or DEMONSTRATIVE_PRONOUN_PATTERN.search(text):
         return True
     if names_a_record(text):
         return False
@@ -274,13 +290,25 @@ def restates_an_earlier_turn(rewritten: str, history: list[ConversationTurn]) ->
 
 
 def build_history_prompt(history: list[ConversationTurn], query: str) -> str:
+    """Render recent turns oldest-first, with the newest one marked.
+
+    The marker matters in a long conversation. Asked six Jira questions and then "who is it
+    assigned to?", the model resolved against ASK-5 — the *oldest* turn still inside the five-turn
+    window — rather than ASK-4, the one immediately before. An unlabelled transcript gives it no
+    reason to prefer the end, and a pronoun almost always refers to the most recent thing.
+    """
     lines: list[str] = []
-    for turn in history:
+    for position, turn in enumerate(history):
+        is_newest = position == len(history) - 1
+        label = "MOST RECENT exchange" if is_newest else "Earlier exchange"
+        lines.append(f"{label}:")
         # The standalone form of an earlier turn, so a chain of follow-ups resolves against a
         # question rather than against another pronoun.
         lines.append(f"Q: {turn.resolved_query or turn.query}")
         lines.append(f"A: {turn.answer}")
-    lines.append(f"Follow-up question: {query}")
+    lines.append(
+        f"Follow-up question (it refers to the MOST RECENT exchange unless stated): {query}"
+    )
     return "\n".join(lines)
 
 

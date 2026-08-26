@@ -64,6 +64,9 @@ class QueryResponse(BaseModel):
     # The standalone question this turn was actually answered as, when it differed from what was
     # asked. Null for a self-contained question, which is the common case.
     resolved_query: str | None = None
+    # Which answer path handled the question. Exposed because routing is what broke most often and
+    # `tools_used` cannot separate `latest_commit` from `commit_detail` — both reach the same tool.
+    query_type: str | None = None
 
 
 class ProjectSummary(BaseModel):

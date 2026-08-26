@@ -184,6 +184,7 @@ async def run_agent(request: QueryRequest, session: AsyncSession | None = None) 
         unresolved_gaps=final["unresolved_gaps"],
         trace=trace.steps,
         resolved_query=final.get("resolved_query"),
+        query_type=final["query_type"],
     )
     if session is not None and project_exists:
         try:
