@@ -15,17 +15,31 @@ tests proves nothing about generalization.**
 This suite asks the database what is there, builds questions from those values, and checks the
 answers against them. It takes `--project-id` and carries no knowledge of any corpus.
 
-## Result, project `askbase`
+## Result
 
-Corpus: 36 GitHub commits, 8 Jira issues.
+| Project | Corpus | Passed | Not planned |
+|---|---|---:|---:|
+| `askbase` | 36 commits, 8 issues | **7/7** | 1 |
+| `groundwork` | 34 commits | **5/5** | 3 |
 
-| | |
-|---|---:|
-| Cases passed | **7/7** |
-| Cases not planned | 1 |
-
-The unplanned case is the assignee lookup: no Jira issue in this corpus has an assignee. Recorded
+Unplanned cases are those whose ground truth the corpus cannot supply: no `askbase` Jira issue has
+an assignee, and `groundwork` had no Jira connector configured at the time of this run. Recorded
 rather than silently omitted — "7/7 passed" means something different when a case never ran.
+
+### The second project is the one that matters
+
+`askbase` is the corpus this system was built against; passing there was expected and proves
+little. `Manav0411/Groundwork` was synced and answered **without a single line of the suite
+changing** — no new dataset, no new expectations, no code touched. The suite read 34 commits it had
+never seen, derived the newest and second-newest for the most prolific identity, sampled a hash from
+the middle of history, and checked all five answers against what SQL said. All five passed, and the
+SHAs are independently verifiable against `git log`.
+
+The hybrid path was checked by hand on the same corpus, since the suite deliberately asserts only
+deterministic questions. *"What decisions were made about the retrieval approach?"* graded `correct`
+with 4 citations and no gaps; *"Summarize recent engineering activity"* graded `correct` with 8. Both
+answers were grounded in the new project's real commits, and neither borrowed anything from
+`askbase`.
 
 ## What it found on the first run: the harness, not the product
 
@@ -60,7 +74,9 @@ shares code with the thing it checks needs at least one assertion that does not.
 
 ## Limitations
 
-- One project. The suite is built to run against a second and has not yet.
+- Two projects, one owner, one GitHub account. Author-identity normalization has not been tested
+  against a repository with several distinct contributors, which is where it is most likely to
+  break.
 - Deterministic-path questions only. Retrieval and synthesis are measured by the conversation suite
   and `retrieval_runner`; asserting a 3B model's phrasing against unseen data would measure
   variance.
