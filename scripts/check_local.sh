@@ -1,6 +1,20 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Usage: ./scripts/check_local.sh [--model NAME]
+#
+# --model exists to compare candidates on deployment hardware. Model choice in this project is
+# decided by measurement rather than reputation (see backend/evals/baselines/inference.md), and
+# that needs two numbers from the same box, not one.
+MODEL="llama3.2:3b"
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --model) MODEL="$2"; shift 2 ;;
+    --model=*) MODEL="${1#*=}"; shift ;;
+    *) echo "unknown argument: $1" >&2; exit 2 ;;
+  esac
+done
+
 python3.12 --version
 node --version
 npm --version
@@ -30,15 +44,26 @@ else
 fi
 
 # Generation throughput is the number that actually matters, so measure it rather than infer it.
-curl -sf -m 120 "${OLLAMA_URL}/api/chat" \
-  -d '{"model":"llama3.2:3b","stream":false,"think":false,
-       "messages":[{"role":"user","content":"Count to twenty."}]}' \
-  | python3 -c '
-import json, sys
+# Prompt throughput is reported alongside generation because grading -- the most frequent model
+# call -- feeds 8-16 chunks in and gets one bit out, so its cost is dominated by reading.
+curl -sf -m 300 "${OLLAMA_URL}/api/chat" \
+  -d "{\"model\":\"${MODEL}\",\"stream\":false,\"think\":false,
+       \"messages\":[{\"role\":\"user\",\"content\":\"Count to twenty.\"}]}" \
+  | MODEL="${MODEL}" python3 -c '
+import json, os, sys
 d = json.load(sys.stdin)
-tokens = d.get("eval_count", 0)
-seconds = d.get("eval_duration", 1) / 1e9
-rate = tokens / max(seconds, 0.001)
-verdict = "GPU-class" if rate >= 25 else "CPU-class — the GPU is not being used"
-print(f"  llama3.2:3b generation: {rate:.1f} tok/s ({verdict})")
-' || echo "  (throughput check skipped: llama3.2:3b not pulled)"
+model = os.environ["MODEL"]
+gen = d.get("eval_count", 0) / max(d.get("eval_duration", 1) / 1e9, 0.001)
+prompt_tokens = d.get("prompt_eval_count", 0)
+prompt_seconds = d.get("prompt_eval_duration", 0) / 1e9
+# The 25 tok/s threshold was calibrated against llama3.2:3b and does not transfer: qwen3:8b
+# measures 18 tok/s on the same Metal GPU, which is healthy for its size and would be reported
+# as a failure. A wrong verdict is worse than none, so other models get the numbers only.
+if model == "llama3.2:3b":
+    verdict = "GPU-class" if gen >= 25 else "CPU-class — the GPU is not being used"
+    print(f"  {model} generation: {gen:.1f} tok/s ({verdict})")
+else:
+    print(f"  {model} generation: {gen:.1f} tok/s")
+if prompt_tokens and prompt_seconds:
+    print(f"  {model} prompt:     {prompt_tokens / prompt_seconds:.1f} tok/s")
+' || echo "  (throughput check skipped: ${MODEL} not pulled)"

@@ -63,6 +63,10 @@ services:
     container_name: groundwork-frontend
     env_file:
       - .env
+    environment:
+      # Reached by the Next.js server process, not by the browser: the browser calls /api on this
+      # container's own origin and the proxy attaches APP_API_KEY server-side.
+      API_BASE_URL: http://backend:8000
     ports:
       - "3000:3000"
     depends_on:
