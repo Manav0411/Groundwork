@@ -223,7 +223,15 @@ npm run dev
 - `GET /projects/{project_id}/sync/jira`
 - `GET /projects`
 - `GET /projects/{project_id}/timeline`
+- `GET /conversations/{conversation_id}`
 - `GET /conversations/{conversation_id}/trace`
+
+`POST /query` accepts an optional `conversation_id` to continue a conversation. A follow-up that
+depends on earlier turns — "who is it assigned to?" — is rewritten into a standalone question
+*before* routing, so it reaches the same deterministic SQL path the question it follows did; the
+standalone form comes back as `resolved_query`. A self-contained question skips resolution
+entirely, so exact-answer queries stay free of model latency. An unknown or cross-project
+`conversation_id` is a 404.
 
 GitHub sync follows API pagination, stores rate-limit status, and uses an overlap cursor after the
 first successful run. Synced commits are atomically upserted, chunked, embedded when Ollama is

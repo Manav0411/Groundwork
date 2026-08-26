@@ -30,10 +30,26 @@ class TraceStep(BaseModel):
     summary: str
 
 
+class ConversationTurn(BaseModel):
+    """One earlier question and its answer.
+
+    `resolved_query` holds the standalone form when the turn was itself a follow-up, so a chain of
+    follow-ups resolves against a real question rather than against another pronoun.
+    """
+
+    query: str
+    resolved_query: str | None = None
+    answer: str
+    retrieval_grade: RetrievalGrade
+    created_at: str | None = None
+
+
 class QueryRequest(BaseModel):
     query: str
     project_id: str = "project-atlas"
     include_trace: bool = True
+    # Absent means "start a new conversation", which is what every caller before this phase did.
+    conversation_id: str | None = None
 
 
 class QueryResponse(BaseModel):
@@ -45,6 +61,9 @@ class QueryResponse(BaseModel):
     evidence: list[EvidenceItem]
     unresolved_gaps: list[str]
     trace: list[TraceStep]
+    # The standalone question this turn was actually answered as, when it differed from what was
+    # asked. Null for a self-contained question, which is the common case.
+    resolved_query: str | None = None
 
 
 class ProjectSummary(BaseModel):

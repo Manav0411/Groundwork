@@ -5,7 +5,8 @@ answer paths previously duplicated the guardrail, planner, and citation-validati
 share those nodes and differ only in how evidence is gathered.
 """
 
-from app.agent.routing import describe_route
+from app.agent.followup import needs_resolution, resolve_followup
+from app.agent.routing import classify_query, describe_route
 from app.agent.state import AgentState
 from app.connectors.synthetic_workspace import get_weekly_brief_evidence, is_synthetic_project
 from app.connectors.tavily import TavilyConnector, web_results_to_response
@@ -51,10 +52,51 @@ async def guardrail(state: AgentState) -> AgentState:
     return {}
 
 
+async def resolve(state: AgentState) -> AgentState:
+    """Turn a follow-up into a standalone question before anything routes on it.
+
+    Returns an updated `request` rather than a separate field, so every downstream node keeps
+    reading `state["request"].query` and needs no knowledge that multi-turn exists.
+    """
+    request = state["request"]
+    history = state.get("history") or []
+    resolved: str | None = None
+
+    with state["trace"].step("Follow-up Resolution") as step:
+        if not history:
+            step.summary = "First turn in the conversation; nothing to resolve against."
+        elif not needs_resolution(request.query):
+            step.summary = "Question is self-contained; skipped resolution."
+        else:
+            resolved = await resolve_followup(request.query, history)
+            if resolved is None:
+                # Covers three cases the caller does not need to distinguish: the model was
+                # unavailable, it returned something unusable, or the identifier guard rejected it.
+                step.summary = (
+                    "Could not resolve the follow-up; answering the question as it was asked."
+                )
+            else:
+                step.summary = f"Resolved follow-up to: {resolved!r}"
+
+    if resolved is None:
+        return {"resolved_query": None}
+    return {
+        "request": request.model_copy(update={"query": resolved}),
+        "resolved_query": resolved,
+        "tools_used": [*state.get("tools_used", []), "followup_resolution"],
+    }
+
+
 async def plan(state: AgentState) -> AgentState:
+    """Classify the (possibly resolved) question and record the routing decision.
+
+    Classification lives here rather than in `run_agent` so that it happens *after* resolution —
+    routing a follow-up on its unresolved text is the bug this phase exists to fix.
+    """
+    query_type = classify_query(state["request"].query)
     with state["trace"].step("Planner") as step:
-        step.summary = describe_route(state["query_type"], state["request"].query)
-    return {}
+        step.summary = describe_route(query_type, state["request"].query)
+    return {"query_type": query_type}
 
 
 async def structured_github(state: AgentState) -> AgentState:

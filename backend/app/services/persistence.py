@@ -8,8 +8,71 @@ from app.db.models import (
     RetrievedEvidence,
     TraceStepRecord,
 )
-from app.models.schemas import QueryRequest, QueryResponse
+from app.models.schemas import ConversationTurn, QueryRequest, QueryResponse
 from app.services.retrieval import RetrievedRecord
+
+
+class ConversationNotFoundError(LookupError):
+    """Raised when a conversation id is unknown, or belongs to a different project."""
+
+
+async def _conversation_for(
+    session: AsyncSession, public_id: str, project_id: str
+) -> Conversation | None:
+    """Load a conversation, refusing one that belongs to another project.
+
+    Scoping is enforced here rather than trusted from the caller: an id leaking across projects
+    would let one project's history steer another project's answers.
+    """
+    conversation = await session.scalar(
+        select(Conversation).where(Conversation.public_id == public_id)
+    )
+    if conversation is None:
+        return None
+    if conversation.project_id != project_id:
+        raise ConversationNotFoundError(
+            f"Conversation {public_id!r} does not belong to project {project_id!r}."
+        )
+    return conversation
+
+
+async def load_conversation_history(
+    session: AsyncSession,
+    public_id: str,
+    project_id: str,
+    *,
+    limit: int = 5,
+) -> list[ConversationTurn]:
+    """The most recent turns, oldest first.
+
+    Bounded so the resolution prompt cannot grow with the conversation. Only the question and
+    answer text are returned — never evidence or citations, because history must not be able to
+    become a source for a later answer.
+    """
+    conversation = await _conversation_for(session, public_id, project_id)
+    if conversation is None:
+        raise ConversationNotFoundError(f"Conversation {public_id!r} does not exist.")
+
+    runs = list(
+        (
+            await session.scalars(
+                select(QueryRun)
+                .where(QueryRun.conversation_id == conversation.id)
+                .order_by(QueryRun.created_at.desc(), QueryRun.id.desc())
+                .limit(limit)
+            )
+        ).all()
+    )
+    return [
+        ConversationTurn(
+            query=run.query,
+            resolved_query=run.resolved_query,
+            answer=run.answer,
+            retrieval_grade=run.retrieval_grade,
+            created_at=run.created_at.isoformat() if run.created_at else None,
+        )
+        for run in reversed(runs)
+    ]
 
 
 async def persist_query_run(
@@ -19,16 +82,21 @@ async def persist_query_run(
     response: QueryResponse,
     records: list[RetrievedRecord],
 ) -> None:
-    conversation = Conversation(
-        public_id=response.conversation_id,
-        project_id=request.project_id,
-    )
-    session.add(conversation)
+    # A conversation is created once and appended to thereafter. Before multi-turn this always
+    # inserted, which is why every conversation was exactly one question long.
+    conversation = await _conversation_for(session, response.conversation_id, request.project_id)
+    if conversation is None:
+        conversation = Conversation(
+            public_id=response.conversation_id,
+            project_id=request.project_id,
+        )
+        session.add(conversation)
     await session.flush()
 
     query_run = QueryRun(
         conversation_id=conversation.id,
         query=request.query,
+        resolved_query=response.resolved_query,
         query_type=query_type,
         answer=response.answer,
         retrieval_grade=response.retrieval_grade,

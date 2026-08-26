@@ -43,6 +43,18 @@ def test_exact_answer_paths_skip_grading_and_synthesis() -> None:
         assert (path, "synthesize") not in edges
 
 
+def test_resolution_runs_before_routing() -> None:
+    """Routing reads identifiers out of the question text, so a follow-up must be resolved first.
+
+    If `plan` ever precedes `resolve` again, "who is it assigned to?" goes back to being routed on
+    a pronoun and answered by generic retrieval.
+    """
+    edges = _edges()
+    assert ("guardrail", "resolve") in edges
+    assert ("resolve", "plan") in edges
+    assert ("guardrail", "plan") not in edges
+
+
 def test_corrective_cycle_exists() -> None:
     """The one real cycle, and the reason a graph is warranted at all."""
     edges = _edges()

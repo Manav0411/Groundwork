@@ -22,9 +22,9 @@ from app.agent.tracing import TraceRecorder
 from app.connectors.synthetic_workspace import get_projects
 from app.core.config import settings
 from app.db.models import Project
-from app.models.schemas import QueryRequest, QueryResponse
+from app.models.schemas import ConversationTurn, QueryRequest, QueryResponse
 from app.services.ingestion import upsert_project
-from app.services.persistence import persist_query_run
+from app.services.persistence import load_conversation_history, persist_query_run
 
 __all__ = ["AGENT_GRAPH", "build_graph", "classify_query", "run_agent"]
 
@@ -62,6 +62,7 @@ def build_graph():
     builder = StateGraph(AgentState)
 
     builder.add_node("guardrail", nodes.guardrail)
+    builder.add_node("resolve", nodes.resolve)
     builder.add_node("plan", nodes.plan)
     builder.add_node("structured_github", nodes.structured_github)
     builder.add_node("structured_jira", nodes.structured_jira)
@@ -74,7 +75,10 @@ def build_graph():
     builder.add_node("validate", nodes.validate)
 
     builder.add_edge(START, "guardrail")
-    builder.add_edge("guardrail", "plan")
+    # Resolution sits ahead of the planner because routing reads identifiers out of the question
+    # text, and a follow-up has none until it is resolved.
+    builder.add_edge("guardrail", "resolve")
+    builder.add_edge("resolve", "plan")
     builder.add_conditional_edges(
         "plan",
         _route_after_plan,
@@ -129,14 +133,29 @@ async def run_agent(request: QueryRequest, session: AsyncSession | None = None) 
                 project = await session.get(Project, request.project_id)
                 project_exists = project is not None
 
-    query_type = classify_query(request.query)
+    # History is loaded here rather than in a node so that an unknown or cross-project conversation
+    # id is rejected before any work is done. It feeds only the resolution prompt — never
+    # retrieval, evidence, or citations.
+    history: list[ConversationTurn] = []
+    conversation_id = request.conversation_id
+    if session is not None and conversation_id:
+        history = await load_conversation_history(
+            session,
+            conversation_id,
+            request.project_id,
+            limit=settings.conversation_history_turns,
+        )
+
     trace = TraceRecorder()
     initial: AgentState = {
         "request": request,
         "session": session,
         "project_exists": project_exists,
         "jira_configured": project is not None and project.jira_project_key is not None,
-        "query_type": query_type,
+        "history": history,
+        "original_query": request.query,
+        "resolved_query": None,
+        "query_type": "weekly_project_brief",
         "trace": trace,
         "records": [],
         "evidence": [],
@@ -156,7 +175,7 @@ async def run_agent(request: QueryRequest, session: AsyncSession | None = None) 
     )
 
     response = QueryResponse(
-        conversation_id=f"conv-{uuid4().hex[:12]}",
+        conversation_id=conversation_id or f"conv-{uuid4().hex[:12]}",
         answer=final["answer"],
         retrieval_grade=final["retrieval_grade"],
         tools_used=final["tools_used"],
@@ -164,10 +183,19 @@ async def run_agent(request: QueryRequest, session: AsyncSession | None = None) 
         evidence=final["evidence"],
         unresolved_gaps=final["unresolved_gaps"],
         trace=trace.steps,
+        resolved_query=final.get("resolved_query"),
     )
     if session is not None and project_exists:
         try:
-            await persist_query_run(session, request, query_type, response, final["records"])
+            await persist_query_run(
+                session,
+                # The question as typed is what gets stored as `query`; the standalone form it was
+                # answered as is stored alongside it.
+                request.model_copy(update={"query": final["original_query"]}),
+                final["query_type"],
+                response,
+                final["records"],
+            )
         except Exception:
             await session.rollback()
             raise
