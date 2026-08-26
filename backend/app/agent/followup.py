@@ -26,6 +26,7 @@ import re
 from app.agent.routing import BLOCKER_PATTERN, COMMIT_PATTERN, DECISION_PATTERN
 from app.core.config import settings
 from app.models.schemas import ConversationTurn
+from app.services.citations import CITATION_MARKER
 from app.services.llm import OllamaClient
 from app.services.structured_github import (
     ORDINAL_PATTERN,
@@ -308,6 +309,13 @@ async def resolve_followup(
 
     rewritten = str(payload.get("query") or "").strip()
     if not rewritten or len(rewritten) > 500:
+        return None
+    # A question never contains a citation marker. When one appears, the model has pasted the
+    # previous *answer* into the rewrite rather than resolving the question — live testing produced
+    # 'What features did the commit f4a941f by Manav Goel — "Refactor README...", committed at
+    # 2026-05-11T14:38:59+00:00 [1] change?'. It happened to route correctly and was still shown to
+    # the user as the question they had asked.
+    if CITATION_MARKER.search(rewritten):
         return None
     if _normalize(rewritten) == _normalize(query):
         return None

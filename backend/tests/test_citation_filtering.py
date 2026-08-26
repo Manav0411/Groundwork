@@ -90,3 +90,27 @@ async def test_the_trace_reports_what_was_dropped(count: int) -> None:
 
     summary = state["trace"].steps[-1].summary
     assert f"Dropped {count}" in summary
+
+
+class RecordingClient:
+    """Returns a scripted answer per call so the retry can be observed."""
+
+    def __init__(self, answers: list[str]) -> None:
+        self.answers = answers
+        self.systems: list[str] = []
+
+    async def generate(self, system_prompt: str, user_prompt: str) -> str:
+        self.systems.append(system_prompt)
+        return self.answers[min(len(self.systems) - 1, len(self.answers) - 1)]
+
+
+def test_the_insist_prompt_is_only_added_on_the_retry() -> None:
+    """The second attempt has to tell the model what went wrong, or it repeats itself."""
+    from app.services.llm import build_answer_prompt
+
+    first, _ = build_answer_prompt("q", ["[1] evidence"])
+    retry, _ = build_answer_prompt("q", ["[1] evidence"], insist_on_citations=True)
+
+    assert "previous attempt" not in first
+    assert "previous attempt" in retry
+    assert "no bracketed ids" in retry

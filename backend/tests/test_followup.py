@@ -495,3 +495,15 @@ def test_author_extraction_stops_at_any_prepositional_clause() -> None:
     assert extract_commit_author("last commit by Manav0411 on project AskBase?") == "Manav0411"
     assert extract_commit_author("commit by Manav0411 for repository AskBase.") == "Manav0411"
     assert extract_commit_author("What was the last commit by Manav Goel?") == "Manav Goel"
+
+
+async def test_a_rewrite_containing_a_citation_marker_is_rejected() -> None:
+    """A question never carries a citation marker; one means the answer was pasted in.
+
+    Live testing produced: 'What features did the commit f4a941f by Manav Goel — "Refactor
+    README...", committed at 2026-05-11T14:38:59+00:00 [1] change?'. It routed correctly by
+    accident and was still shown to the user as the question they had asked.
+    """
+    client = StubOllama({"query": "What did commit f4a941f — “Refactor README” [1] change?"})
+
+    assert await resolve_followup("what did it change?", _history(), client) is None
