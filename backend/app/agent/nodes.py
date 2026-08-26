@@ -13,7 +13,6 @@ from app.agent.followup import (
 )
 from app.agent.routing import classify_query, describe_route
 from app.agent.state import AgentState
-from app.connectors.synthetic_workspace import get_weekly_brief_evidence, is_synthetic_project
 from app.connectors.tavily import TavilyConnector, web_results_to_response
 from app.core.config import settings
 from app.models.schemas import RetrievalGrade
@@ -23,7 +22,6 @@ from app.services.llm import (
     OllamaClient,
     build_answer_prompt,
     fallback_answer_from_evidence,
-    fallback_weekly_brief_answer,
 )
 from app.services.retrieval import hybrid_retrieve, records_to_response
 from app.services.structured_github import (
@@ -48,9 +46,6 @@ NO_EVIDENCE_ANSWER = (
 )
 NO_EVIDENCE_GAP = (
     "No indexed evidence matched this question, so no part of an answer could be supported."
-)
-SYNTHETIC_DEMO_GAP = (
-    "This answer uses the built-in synthetic demo workspace, not synchronized project data."
 )
 WEB_SOURCED_GAP = (
     "No indexed project evidence supported this question, so the answer comes from public web "
@@ -371,23 +366,6 @@ async def retrieve(state: AgentState) -> AgentState:
 async def grade(state: AgentState) -> AgentState:
     request, records = state["request"], state.get("records", [])
 
-    # The synthetic demo workspace is fixture data, not retrieved evidence, so there is nothing to
-    # grade. It is scoped to the sample projects and can never supply evidence to a real one.
-    if not records and is_synthetic_project(request.project_id):
-        with state["trace"].step("Retrieval Grader") as step:
-            evidence, citations = get_weekly_brief_evidence(request.project_id)
-            step.summary = (
-                "Only synthetic demo evidence was available; graded ambiguous and disclosed it."
-            )
-        return {
-            "evidence": evidence,
-            "citations": citations,
-            "retrieval_grade": "ambiguous",
-            "unresolved_gaps": [*state.get("unresolved_gaps", []), SYNTHETIC_DEMO_GAP],
-            "tools_used": [*state.get("tools_used", []), "synthetic_workspace", "retrieval_grader"],
-            "grade_result": None,
-        }
-
     with state["trace"].step("Retrieval Grader") as step:
         result = await grade_retrieval(
             request.query, records, ollama=OllamaClient(), corrected=state.get("corrected", False)
@@ -494,12 +472,9 @@ async def synthesize(state: AgentState) -> AgentState:
         f"[{item.citation_id}] {item.source_type}: {item.title} — {item.snippet}"
         for item in evidence
     ]
-    # The canned demo brief belongs only to the synthetic sample projects.
-    answer = (
-        fallback_weekly_brief_answer()
-        if is_synthetic_project(request.project_id) and not state.get("records")
-        else fallback_answer_from_evidence(request.query, evidence_lines)
-    )
+    # Used only when the model is unavailable. It restates retrieved evidence and invents
+    # nothing, which is the only honest thing to return without a generator.
+    answer = fallback_answer_from_evidence(request.query, evidence_lines)
     if settings.llm_provider == "ollama":
         with state["trace"].step("Ollama Answer Generator") as step:
             try:

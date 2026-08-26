@@ -2,10 +2,7 @@ import pytest
 
 from app.agent.graph import classify_query
 from app.agent.routing import is_structured
-from app.connectors.synthetic_workspace import (
-    get_weekly_brief_evidence,
-    is_synthetic_project,
-)
+from app.connectors import synthetic_workspace
 from app.services.structured_github import extract_commit_author, extract_commit_sha
 
 
@@ -34,33 +31,41 @@ def test_issue_key_wins_over_incidental_commit_mention() -> None:
     assert classify_query("Which commits relate to ASK-6?") == "jira_issue_status"
 
 
-def test_synthetic_evidence_is_scoped_to_the_demo_projects() -> None:
-    evidence, citations = get_weekly_brief_evidence("project-atlas")
-    assert evidence and citations
+def test_the_sample_projects_carry_no_evidence() -> None:
+    """The fabrication surface is gone, not merely scoped.
+
+    This module used to hold invented Project Atlas blockers and sprint plans, returned by
+    `get_weekly_brief_evidence` for any project id. Scoping it to the demo projects contained the
+    leak but kept the mechanism, so a later change could reopen it. There is now nothing to leak:
+    the sample projects are empty shells and take the ordinary no-evidence path.
+    """
+    assert not hasattr(synthetic_workspace, "get_weekly_brief_evidence")
+    assert all(
+        not hasattr(synthetic_workspace, name)
+        for name in ("EVIDENCE", "CITATIONS", "is_synthetic_project")
+    )
+    assert [project.id for project in synthetic_workspace.get_projects()] == [
+        "project-atlas",
+        "project-orion",
+    ]
 
 
-@pytest.mark.parametrize("project_id", ["askbase", "project-x", "unknown"])
-def test_synthetic_evidence_is_never_lent_to_a_real_project(project_id: str) -> None:
-    """The fabrication bug: this used to return Project Atlas fixtures for any project id."""
-    assert is_synthetic_project(project_id) is False
-    assert get_weekly_brief_evidence(project_id) == ([], [])
+def test_synthesis_has_no_canned_answer() -> None:
+    """Regression: a hardcoded brief carrying [1]-[5] markers used to be returned verbatim.
 
-
-def test_demo_brief_is_scoped_to_synthetic_projects() -> None:
-    """Regression: the canned Project Atlas brief leaked into real projects answered from the web.
-
-    The web-fallback path sets `records` to empty while still holding evidence, and the synthesis
-    branch keyed the demo brief on `not records` rather than on the project actually being a demo.
+    It was guarded three ways and unreachable in normal operation, which is exactly why it
+    survived so long. The only fallback now restates retrieved evidence.
     """
     import inspect
 
     from app.agent import nodes
+    from app.services import llm
 
+    assert not hasattr(llm, "fallback_weekly_brief_answer")
     source = inspect.getsource(nodes.synthesize)
-    marker = "fallback_weekly_brief_answer()"
-    assert marker in source
-    guard = source.split(marker, 1)[1].split("\n)", 1)[0]
-    assert "is_synthetic_project" in guard
+    assert "fallback_answer_from_evidence" in source
+    assert "weekly_brief" not in source
+    assert "synthetic" not in source.casefold()
 
 
 def test_a_named_commit_hash_gets_its_own_exact_lookup() -> None:

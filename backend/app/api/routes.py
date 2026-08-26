@@ -97,15 +97,6 @@ async def ingest_workspace(session: DatabaseSession) -> dict[str, object]:
     return {"status": "loaded", **stats}
 
 
-@router.post("/sync/github", dependencies=[Depends(require_api_key)])
-async def sync_github(
-    session: DatabaseSession,
-    project_id: str = "project-atlas",
-    max_commits: int | None = None,
-) -> dict[str, object]:
-    return await _sync_github_project(session, project_id, max_commits)
-
-
 @router.post("/projects/{project_id}/sync/github", dependencies=[Depends(require_api_key)])
 async def sync_project_github(
     project_id: str,

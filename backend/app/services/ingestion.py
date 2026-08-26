@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.connectors.github import GitHubCommit
 from app.connectors.jira import JiraIssue
 from app.connectors.slack import SlackThread
-from app.connectors.synthetic_workspace import get_projects, get_weekly_brief_evidence
+from app.connectors.synthetic_workspace import get_projects
 from app.db.models import DocumentChunk, Project, SourceDocument
 from app.services.llm import OllamaClient
 
@@ -182,30 +182,17 @@ async def ingest_documents(
 
 
 async def seed_synthetic_workspace(session: AsyncSession) -> dict[str, int]:
+    """Create the empty sample projects.
+
+    This used to also ingest fixture documents, which made the sample projects answer questions
+    from invented evidence. They are now genuinely empty: the seeder registers the projects so the
+    picker has something to show, and nothing else.
+    """
     projects = get_projects()
     for project in projects:
         await upsert_project(session, project)
-    await session.flush()
-
-    documents: list[IngestDocument] = []
-    for project in projects:
-        evidence, citations = get_weekly_brief_evidence(project.id)
-        citation_by_id = {citation.id: citation for citation in citations}
-        for item in evidence:
-            citation = citation_by_id[item.citation_id]
-            documents.append(
-                IngestDocument(
-                    project_id=project.id,
-                    source_type=item.source_type,
-                    external_id=f"synthetic-{item.id}",
-                    title=item.title,
-                    content=item.snippet,
-                    url=citation.url,
-                    metadata={"synthetic": True, "authority": item.authority},
-                )
-            )
-    stats = await ingest_documents(session, documents, OllamaClient())
-    return {"projects": len(projects), **stats}
+    await session.commit()
+    return {"projects": len(projects), "documents": 0, "chunks": 0, "embedded": 0}
 
 
 def github_commit_documents(project_id: str, commits: list[GitHubCommit]) -> list[IngestDocument]:

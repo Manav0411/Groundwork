@@ -46,7 +46,9 @@ class ConversationTurn(BaseModel):
 
 class QueryRequest(BaseModel):
     query: str
-    project_id: str = "project-atlas"
+    # Required. This defaulted to the demo project, so a caller that forgot it got a confident
+    # answer about the wrong project instead of an error.
+    project_id: str
     include_trace: bool = True
     # Absent means "start a new conversation", which is what every caller before this phase did.
     conversation_id: str | None = None
