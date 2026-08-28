@@ -20,20 +20,32 @@ answers against them. It takes `--project-id` and carries no knowledge of any co
 | Project | Corpus | Passed | Not planned |
 |---|---|---:|---:|
 | `askbase` | 36 commits, 8 issues | **7/7** | 1 |
-| `groundwork` | 34 commits | **5/5** | 3 |
+| `groundwork` | 34 commits, 12 issues | **8/8** | 0 |
 
-Unplanned cases are those whose ground truth the corpus cannot supply: no `askbase` Jira issue has
-an assignee, and `groundwork` had no Jira connector configured at the time of this run. Recorded
-rather than silently omitted — "7/7 passed" means something different when a case never ran.
+The one unplanned case is `askbase`'s assignee lookup: not a single one of its 8 Jira issues has an
+assignee, so the ground truth does not exist. Recorded rather than silently omitted — "7/7 passed"
+means something different when a case never ran.
+
+That gap is also why `issues_by_assignee` had never executed at all until `groundwork` was given a
+Jira project. Three of the eight cases — `issue_by_key`, `issues_by_assignee`, `issue_counts` — had
+only ever been tested against the corpus the system was built on. All three passed first try
+against a corpus written days later, and the citation counts are the tell: the assignee lookup
+returned exactly the 8 assigned issues, and the count returned exactly the 9 that are not done.
 
 ### The second project is the one that matters
 
 `askbase` is the corpus this system was built against; passing there was expected and proves
 little. `Manav0411/Groundwork` was synced and answered **without a single line of the suite
-changing** — no new dataset, no new expectations, no code touched. The suite read 34 commits it had
-never seen, derived the newest and second-newest for the most prolific identity, sampled a hash from
-the middle of history, and checked all five answers against what SQL said. All five passed, and the
-SHAs are independently verifiable against `git log`.
+changing** — no new dataset, no new expectations, no code touched. The suite read 34 commits and 12
+Jira issues it had never seen, derived the newest and second-newest for the most prolific identity,
+sampled a hash from the middle of history, picked a real issue key and a real assignee, and checked
+all eight answers against what SQL said. All eight passed, and the SHAs are independently
+verifiable against `git log`.
+
+Answers were also read by hand rather than only diffed. *"Are all the tasks complete?"* returned
+"No — 3 of 12 indexed Jira issues are done, and 9 are not", enumerating and citing each; the count
+matches the Jira API exactly. *"What blockers are open?"* found the single issue carrying both
+`Highest` priority and the `blocked` label.
 
 The hybrid path was checked by hand on the same corpus, since the suite deliberately asserts only
 deterministic questions. *"What decisions were made about the retrieval approach?"* graded `correct`
@@ -76,7 +88,13 @@ shares code with the thing it checks needs at least one assertion that does not.
 
 - Two projects, one owner, one GitHub account. Author-identity normalization has not been tested
   against a repository with several distinct contributors, which is where it is most likely to
-  break.
+  break. Tracked as `GW-9`.
+- **`groundwork`'s Jira project was written by hand for this test**, so it is weaker evidence than
+  a backlog that grew on its own. It was populated from the project's genuine open work — background
+  sync, `/metrics`, rate limiting, the EC2 deploy — rather than filler, which keeps the text real,
+  but the corpus did not arrive by accident and that is worth knowing when reading the result.
+- Slack is not yet connected on `groundwork`, so cross-source retrieval is still exercised on
+  `askbase` alone.
 - Deterministic-path questions only. Retrieval and synthesis are measured by the conversation suite
   and `retrieval_runner`; asserting a 3B model's phrasing against unseen data would measure
   variance.
