@@ -29,6 +29,22 @@ LATEST_PATTERN = re.compile(
     r"\b(?:latest|last|most\s+recent|newest|earliest|first)\b", re.IGNORECASE
 )
 
+# Quantifier and count questions about the issue set as a whole: "are all the tasks complete?",
+# "how many issues are still open?". These have no answer in the RAG path — the grader asks
+# whether a passage supports the answer, and a quantifier is answered by the set, not by any
+# member — so every chunk is correctly rejected and the question is refused. Counting rows
+# answers them exactly. Both halves are required: a work noun without a quantifier is an
+# ordinary topic question, and a quantifier without one ("what is left to do?") is too vague to
+# claim.
+WORK_NOUN_PATTERN = re.compile(
+    r"\b(?:tasks?|issues?|tickets?|stor(?:y|ies)|work\s+items?)\b", re.IGNORECASE
+)
+AGGREGATE_PATTERN = re.compile(
+    r"\b(?:all|every|any|none|how\s+many|count|number\s+of|remaining|outstanding|"
+    r"complete|completed|done|finished|closed|resolved|open)\b",
+    re.IGNORECASE,
+)
+
 
 def classify_query(query: str) -> QueryType:
     """Pick the retrieval path for a question.
@@ -68,7 +84,13 @@ def classify_query(query: str) -> QueryType:
         ):
             return "latest_commit"
 
-    # 5. Topic categories below here all share the hybrid retrieval path; the distinction only
+    # 5. A question about the issue set rather than about one issue. Ordered after the exact
+    #    identifiers, which name a single record and are more specific, and before the topic
+    #    categories, which would send it to retrieval and get it refused.
+    if WORK_NOUN_PATTERN.search(query) and AGGREGATE_PATTERN.search(query):
+        return "jira_project_status"
+
+    # 6. Topic categories below here all share the hybrid retrieval path; the distinction only
     #    labels the trace.
     if BLOCKER_PATTERN.search(query):
         return "blocker_investigation"
@@ -78,7 +100,13 @@ def classify_query(query: str) -> QueryType:
 
 
 def is_structured(query_type: QueryType) -> bool:
-    return query_type in {"latest_commit", "commit_detail", "jira_issue_status", "jira_assignee"}
+    return query_type in {
+        "latest_commit",
+        "commit_detail",
+        "jira_issue_status",
+        "jira_assignee",
+        "jira_project_status",
+    }
 
 
 def describe_route(query_type: QueryType, query: str) -> str:
@@ -89,6 +117,11 @@ def describe_route(query_type: QueryType, query: str) -> str:
     if query_type == "jira_assignee":
         return (
             f"Matched assignee {extract_assignee(query)!r}; selected deterministic Jira SQL."
+        )
+    if query_type == "jira_project_status":
+        return (
+            "Matched a question about the issue set rather than one issue; selected deterministic "
+            "Jira SQL counts."
         )
     if query_type == "latest_commit":
         author = extract_commit_author(query)

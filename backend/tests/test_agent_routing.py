@@ -2,10 +2,7 @@ import pytest
 
 from app.agent.graph import classify_query
 from app.agent.routing import is_structured
-from app.connectors.synthetic_workspace import (
-    get_weekly_brief_evidence,
-    is_synthetic_project,
-)
+from app.connectors import synthetic_workspace
 from app.services.structured_github import extract_commit_author, extract_commit_sha
 
 
@@ -34,33 +31,41 @@ def test_issue_key_wins_over_incidental_commit_mention() -> None:
     assert classify_query("Which commits relate to ASK-6?") == "jira_issue_status"
 
 
-def test_synthetic_evidence_is_scoped_to_the_demo_projects() -> None:
-    evidence, citations = get_weekly_brief_evidence("project-atlas")
-    assert evidence and citations
+def test_the_sample_projects_carry_no_evidence() -> None:
+    """The fabrication surface is gone, not merely scoped.
+
+    This module used to hold invented Project Atlas blockers and sprint plans, returned by
+    `get_weekly_brief_evidence` for any project id. Scoping it to the demo projects contained the
+    leak but kept the mechanism, so a later change could reopen it. There is now nothing to leak:
+    the sample projects are empty shells and take the ordinary no-evidence path.
+    """
+    assert not hasattr(synthetic_workspace, "get_weekly_brief_evidence")
+    assert all(
+        not hasattr(synthetic_workspace, name)
+        for name in ("EVIDENCE", "CITATIONS", "is_synthetic_project")
+    )
+    assert [project.id for project in synthetic_workspace.get_projects()] == [
+        "project-atlas",
+        "project-orion",
+    ]
 
 
-@pytest.mark.parametrize("project_id", ["askbase", "project-x", "unknown"])
-def test_synthetic_evidence_is_never_lent_to_a_real_project(project_id: str) -> None:
-    """The fabrication bug: this used to return Project Atlas fixtures for any project id."""
-    assert is_synthetic_project(project_id) is False
-    assert get_weekly_brief_evidence(project_id) == ([], [])
+def test_synthesis_has_no_canned_answer() -> None:
+    """Regression: a hardcoded brief carrying [1]-[5] markers used to be returned verbatim.
 
-
-def test_demo_brief_is_scoped_to_synthetic_projects() -> None:
-    """Regression: the canned Project Atlas brief leaked into real projects answered from the web.
-
-    The web-fallback path sets `records` to empty while still holding evidence, and the synthesis
-    branch keyed the demo brief on `not records` rather than on the project actually being a demo.
+    It was guarded three ways and unreachable in normal operation, which is exactly why it
+    survived so long. The only fallback now restates retrieved evidence.
     """
     import inspect
 
     from app.agent import nodes
+    from app.services import llm
 
+    assert not hasattr(llm, "fallback_weekly_brief_answer")
     source = inspect.getsource(nodes.synthesize)
-    marker = "fallback_weekly_brief_answer()"
-    assert marker in source
-    guard = source.split(marker, 1)[1].split("\n)", 1)[0]
-    assert "is_synthetic_project" in guard
+    assert "fallback_answer_from_evidence" in source
+    assert "weekly_brief" not in source
+    assert "synthetic" not in source.casefold()
 
 
 def test_a_named_commit_hash_gets_its_own_exact_lookup() -> None:
@@ -117,3 +122,40 @@ def test_superlative_commit_questions_still_reach_the_structured_tool() -> None:
         "What is the latest commit on project AskBase?",
     ):
         assert classify_query(query) == "latest_commit", query
+
+
+@pytest.mark.parametrize(
+    "query",
+    [
+        "Are all the tasks complete?",
+        "How many Jira issues are still open?",
+        "Is every ticket done?",
+        "How many stories are outstanding?",
+    ],
+)
+def test_quantifier_questions_reach_the_counting_tool(query: str) -> None:
+    """These had no answer before: the grader rejects every chunk, correctly.
+
+    Sufficiency is judged per passage, and a quantifier is answered by the set — no single chunk
+    states that all the work is done. Counting rows answers it exactly instead, so the question
+    belongs on the deterministic path rather than in retrieval.
+    """
+    assert classify_query(query) == "jira_project_status"
+    assert is_structured("jira_project_status")
+
+
+@pytest.mark.parametrize(
+    ("query", "expected"),
+    [
+        # A work noun with no quantifier is an ordinary topic question.
+        ("What is the status of ASK-6?", "jira_issue_status"),
+        ("Which issues are assigned to Manav?", "jira_assignee"),
+        # Blockers keep their own route; "open" alone must not capture them.
+        ("What blockers are open in AskBase?", "blocker_investigation"),
+        # A quantifier with no work noun is too vague to claim.
+        ("What work was done on the Slack connector?", "weekly_project_brief"),
+        ("Is everything done?", "weekly_project_brief"),
+    ],
+)
+def test_counting_route_does_not_swallow_neighbouring_intents(query: str, expected: str) -> None:
+    assert classify_query(query) == expected

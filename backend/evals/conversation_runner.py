@@ -206,11 +206,39 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--json-report", type=Path)
     parser.add_argument("--only", help="Run one conversation by id.")
     parser.add_argument(
+        "--category",
+        action="append",
+        help="Run only these categories. Repeatable.",
+    )
+    parser.add_argument(
+        "--fast",
+        action="store_true",
+        help=(
+            "One trial over the deterministic categories only (~3 min instead of ~50). For use "
+            "while iterating; the full suite is still the release gate."
+        ),
+    )
+    parser.add_argument(
         "--sync-before",
         action="store_true",
         help="Refresh each source first, so freshness does not decide the grade.",
     )
     return parser.parse_args()
+
+
+# Everything except the categories that spend their time in retrieval. `exploratory`,
+# `cross_source`, `decision`, and `corpus_limit` run the corrective loop and several model calls a
+# turn, which is where the ~50 minutes goes. The rest reach a structured path and answer in
+# milliseconds once the follow-up is resolved.
+FAST_CATEGORIES = (
+    "exact_answer",
+    "resolution",
+    "ambiguity",
+    "integrity",
+    "aggregate",
+    "citations",
+    "refusal",
+)
 
 
 async def main() -> int:
@@ -220,12 +248,18 @@ async def main() -> int:
         cases = [case for case in cases if case.id == args.only]
         if not cases:
             raise SystemExit(f"No conversation with id {args.only!r}")
+    categories = tuple(args.category) if args.category else (FAST_CATEGORIES if args.fast else ())
+    if categories:
+        cases = [case for case in cases if case.category in categories]
+        if not cases:
+            raise SystemExit(f"No conversations in categories {list(categories)}")
+    trials = 1 if args.fast else args.trials
     summary = await run_conversations(
         cases,
         dataset_name=args.dataset.name,
         base_url=args.base_url,
         api_key=args.api_key,
-        trials=args.trials,
+        trials=trials,
         sync_before=args.sync_before,
     )
     markdown = render_markdown(summary)

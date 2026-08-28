@@ -5,6 +5,8 @@ answer paths previously duplicated the guardrail, planner, and citation-validati
 share those nodes and differ only in how evidence is gathered.
 """
 
+import re
+
 from app.agent.followup import (
     carry_forward_author,
     needs_resolution,
@@ -13,7 +15,6 @@ from app.agent.followup import (
 )
 from app.agent.routing import classify_query, describe_route
 from app.agent.state import AgentState
-from app.connectors.synthetic_workspace import get_weekly_brief_evidence, is_synthetic_project
 from app.connectors.tavily import TavilyConnector, web_results_to_response
 from app.core.config import settings
 from app.models.schemas import RetrievalGrade
@@ -23,7 +24,6 @@ from app.services.llm import (
     OllamaClient,
     build_answer_prompt,
     fallback_answer_from_evidence,
-    fallback_weekly_brief_answer,
 )
 from app.services.retrieval import hybrid_retrieve, records_to_response
 from app.services.structured_github import (
@@ -39,6 +39,7 @@ from app.services.structured_jira import (
     extract_issue_key,
     jira_issue_by_key,
     jira_issues_by_assignee,
+    jira_project_status,
     open_jira_blockers,
 )
 
@@ -49,8 +50,17 @@ NO_EVIDENCE_ANSWER = (
 NO_EVIDENCE_GAP = (
     "No indexed evidence matched this question, so no part of an answer could be supported."
 )
-SYNTHETIC_DEMO_GAP = (
-    "This answer uses the built-in synthetic demo workspace, not synchronized project data."
+# "What features did the last commit change?" routes correctly and finds the right commit, then
+# answers with the commit's metadata as though that were the answer. It is not: a commit message
+# records what changed, not which product feature it belonged to, and nothing in the indexed corpus
+# maps one to the other. The commit is still worth returning — but the unanswered half is disclosed
+# rather than papered over by an answer that looks complete.
+COMMIT_CONTENT_PATTERN = re.compile(
+    r"\b(?:features?|functionality|capabilit(?:y|ies)|behaviou?rs?)\b", re.IGNORECASE
+)
+COMMIT_CONTENT_GAP = (
+    "Commit messages record what changed, not which feature it belonged to, so the feature this "
+    "commit relates to is not answerable from the indexed history."
 )
 WEB_SOURCED_GAP = (
     "No indexed project evidence supported this question, so the answer comes from public web "
@@ -239,6 +249,10 @@ async def structured_github(state: AgentState) -> AgentState:
                 step.summary = "No exact or unique partial author match was found."
                 gaps.append("No matching commit exists in the currently indexed history.")
 
+    if records and COMMIT_CONTENT_PATTERN.search(request.query):
+        grade = "ambiguous"
+        gaps.append(COMMIT_CONTENT_GAP)
+
     evidence, citations = records_to_response(records)
     return {
         "records": records,
@@ -312,6 +326,39 @@ async def structured_jira(state: AgentState) -> AgentState:
                     answer = f"No indexed Jira issues were found for assignee {assignee!r}."
                     gaps.append("No matching assignee exists in the indexed Jira issues.")
                     step.summary = "No Jira assignee match was found."
+        elif query_type == "jira_project_status":
+            lookup = await jira_project_status(session, request.project_id)
+            if lookup.total == 0:
+                answer = (
+                    "No Jira issues are indexed for this project, so there is no work to report "
+                    "on. Run a Jira sync and ask again."
+                )
+                gaps.append("No Jira issues are indexed for this project.")
+                step.summary = "No Jira issues are indexed."
+            elif lookup.complete:
+                answer = f"Yes — all {lookup.total} indexed Jira issues are done."
+                grade = "correct"
+                step.summary = f"Counted {lookup.total} issue(s), all done."
+            else:
+                records = [issue.record for issue in lookup.outstanding]
+                remaining = lookup.total - lookup.done
+                details = "; ".join(
+                    f"{issue.key} — {issue.summary} ({issue.status}) [{index}]"
+                    for index, issue in enumerate(lookup.outstanding, start=1)
+                )
+                more = (
+                    f" and {remaining - len(lookup.outstanding)} more"
+                    if remaining > len(lookup.outstanding)
+                    else ""
+                )
+                answer = (
+                    f"No — {lookup.done} of {lookup.total} indexed Jira issues are done, and "
+                    f"{remaining} are not: {details}{more}."
+                )
+                grade = "correct"
+                step.summary = (
+                    f"Counted {lookup.total} issue(s): {lookup.done} done, {remaining} outstanding."
+                )
         else:
             lookup = await open_jira_blockers(session, request.project_id)
             if lookup.status == "found":
@@ -370,23 +417,6 @@ async def retrieve(state: AgentState) -> AgentState:
 
 async def grade(state: AgentState) -> AgentState:
     request, records = state["request"], state.get("records", [])
-
-    # The synthetic demo workspace is fixture data, not retrieved evidence, so there is nothing to
-    # grade. It is scoped to the sample projects and can never supply evidence to a real one.
-    if not records and is_synthetic_project(request.project_id):
-        with state["trace"].step("Retrieval Grader") as step:
-            evidence, citations = get_weekly_brief_evidence(request.project_id)
-            step.summary = (
-                "Only synthetic demo evidence was available; graded ambiguous and disclosed it."
-            )
-        return {
-            "evidence": evidence,
-            "citations": citations,
-            "retrieval_grade": "ambiguous",
-            "unresolved_gaps": [*state.get("unresolved_gaps", []), SYNTHETIC_DEMO_GAP],
-            "tools_used": [*state.get("tools_used", []), "synthetic_workspace", "retrieval_grader"],
-            "grade_result": None,
-        }
 
     with state["trace"].step("Retrieval Grader") as step:
         result = await grade_retrieval(
@@ -494,12 +524,9 @@ async def synthesize(state: AgentState) -> AgentState:
         f"[{item.citation_id}] {item.source_type}: {item.title} — {item.snippet}"
         for item in evidence
     ]
-    # The canned demo brief belongs only to the synthetic sample projects.
-    answer = (
-        fallback_weekly_brief_answer()
-        if is_synthetic_project(request.project_id) and not state.get("records")
-        else fallback_answer_from_evidence(request.query, evidence_lines)
-    )
+    # Used only when the model is unavailable. It restates retrieved evidence and invents
+    # nothing, which is the only honest thing to return without a generator.
+    answer = fallback_answer_from_evidence(request.query, evidence_lines)
     if settings.llm_provider == "ollama":
         with state["trace"].step("Ollama Answer Generator") as step:
             try:

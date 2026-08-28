@@ -29,6 +29,30 @@ class JiraIssueRecord:
 
 
 @dataclass(frozen=True)
+class JiraProjectStatus:
+    """Issue counts for a whole project, plus the work that is not finished."""
+
+    total: int
+    by_category: dict[str, int]
+    outstanding: list[JiraIssueRecord]
+    last_synced_at: datetime | None
+    stale: bool
+
+    @property
+    def done(self) -> int:
+        return self.by_category.get("done", 0)
+
+    @property
+    def complete(self) -> bool:
+        """True only when there is work and all of it is done.
+
+        An empty project is not a complete one, and saying so is the difference between an answer
+        and a coincidence.
+        """
+        return self.total > 0 and self.done == self.total
+
+
+@dataclass(frozen=True)
 class JiraLookup:
     status: str
     issues: list[JiraIssueRecord]
@@ -201,6 +225,50 @@ async def jira_issues_by_assignee(
         status="ambiguous" if candidates else "not_found",
         issues=[],
         candidates=candidates,
+        last_synced_at=last_synced_at,
+        stale=stale,
+    )
+
+
+async def jira_project_status(session: AsyncSession, project_id: str) -> JiraProjectStatus:
+    """Count the project's issues by status category.
+
+    This exists because quantifier questions have no answer in the RAG path. The grader asks
+    whether a *passage* supports the answer, but "are all the tasks complete?" is answered by the
+    *set* — no single chunk states it, so all of them are correctly rejected and the question is
+    refused. Loosening the grader to fix that would weaken the property it exists for.
+
+    Counting rows answers it exactly instead, on the deterministic path, with no model involved.
+    The outstanding issues come back too so the answer can cite the specific work that is not done
+    rather than asserting a bare number.
+    """
+    last_synced_at, stale = await _sync_freshness(session, project_id)
+    category = func.lower(SourceDocument.source_metadata["status_category"].astext)
+    counts = (
+        await session.execute(
+            select(category, func.count())
+            .where(
+                SourceDocument.project_id == project_id,
+                SourceDocument.source_type == "jira",
+            )
+            .group_by(category)
+        )
+    ).all()
+    by_category = {str(name or "unknown"): int(total) for name, total in counts}
+
+    outstanding = (
+        await session.execute(
+            _base_query(project_id)
+            .where(category != "done")
+            .order_by(desc(SourceDocument.source_created_at), SourceDocument.external_id)
+            .limit(20)
+        )
+    ).all()
+
+    return JiraProjectStatus(
+        total=sum(by_category.values()),
+        by_category=by_category,
+        outstanding=[_issue_from_row(row) for row in outstanding],
         last_synced_at=last_synced_at,
         stale=stale,
     )

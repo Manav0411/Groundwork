@@ -154,18 +154,6 @@ class OllamaClient:
         return embeddings
 
 
-def fallback_weekly_brief_answer() -> str:
-    return (
-        "Project Atlas is currently on track for Sprint 24, with delivery velocity improving "
-        "12% compared with last week [3]. The main risks are payment gateway sandbox "
-        "instability, which remains a high-impact blocker [1], and a staging data backfill "
-        "failure with medium impact [2]. Recent engineering activity is concentrated in the "
-        "backend, including retry logic, upload-flow work, and dependency updates [5]. "
-        "The latest recorded product decision is to use Stripe Connect for multi-tenant "
-        "payouts and roll it out behind a feature flag [4]."
-    )
-
-
 def fallback_answer_from_evidence(query: str, evidence_lines: list[str]) -> str:
     if not evidence_lines:
         return (

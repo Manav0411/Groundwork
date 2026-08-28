@@ -81,15 +81,15 @@ export type JiraSyncReport = JiraSyncStatus & {
   completed_at: string;
 };
 
-const apiBaseUrl = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000";
-const apiKey = process.env.NEXT_PUBLIC_APP_API_KEY ?? "change-me";
+// Same-origin. The API key is attached by `app/api/[...path]/route.ts`, in the server process.
+// It used to be read from NEXT_PUBLIC_APP_API_KEY here, which inlined it into the browser bundle.
+const apiBaseUrl = "/api";
 
 async function apiRequest<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`${apiBaseUrl}${path}`, {
     ...init,
     headers: {
       "Content-Type": "application/json",
-      "X-API-Key": apiKey,
       ...init?.headers
     }
   });

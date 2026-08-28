@@ -1,5 +1,7 @@
 # Inference runtime baseline — 2026-08-26
 
+Re-measured 2026-08-26 (Phase 8.5) to add Qwen3-4B and prompt throughput.
+
 Ollama moved off Docker and onto the host. Everything else in the stack is unchanged, so this
 isolates one variable: whether the GPU is used.
 
@@ -42,12 +44,28 @@ gone, so the comparison was re-run rather than inherited.
 
 ### Grading — the small model wins, decisively
 
-Over the 16 labelled cases in `retrieval_dataset.jsonl`:
+Over the labelled cases in `retrieval_dataset.jsonl`:
 
-| Grader | accuracy | unanswerable refused | paraphrase preserved | mean | max |
-|---|---:|---:|---:|---:|---:|
-| **llama3.2:3b** | **0.950** | 2/3 | **2/2** | **3.4 s** | **4.7 s** |
-| qwen3:8b | 0.900 | **3/3** | 1/2 | 15.0 s | 35.8 s |
+| Grader | accuracy | unanswerable refused | paraphrase preserved | recall | mean | max |
+|---|---:|---:|---:|---:|---:|---:|
+| **llama3.2:3b** | **0.950** | 2/3 | **2/2** | **1.000** | **1.5 s** | **3.1 s** |
+| qwen3:4b (Q4_K_M) | 0.800 | **3/3** | 1/2 | 0.717 | 1.6 s | 3.2 s |
+| qwen3:8b | 0.900 | **3/3** | 1/2 | — | 15.0 s | 35.8 s |
+
+**Qwen3-4B added 2026-08-26**, at 2.5 GB the obvious candidate for a memory-constrained deployment
+box. Measured, it is the worst of the three at this job, and the number that decides it is recall:
+**1.000 → 0.717.** It rejects four questions the corpus genuinely answers —
+
+    readme_updates, credentials_paraphrase, connector_work, ec2_blocker_cross
+
+— each with "no passage states…". That is the dangerous direction of error. A grader that keeps junk
+is caught by citation validation; a grader that discards good evidence burns corrective attempts and
+refuses questions that had an answer, and nothing downstream recovers it.
+
+It does refuse 3/3 unanswerable, where llama3.2:3b refuses 2/3. That is the same trade qwen3:8b
+offered and the same verdict: one extra refusal is not worth four false ones. Warm latency is a
+wash (1.6 s against 1.5 s), so there is no compensating speed argument either — unlike the 8B,
+which at least lost on a dimension that a faster machine could fix.
 
 `qwen3:8b` refuses one more unanswerable question — the property the grader exists for — and gives
 back more than it gains elsewhere, at 4.4x the latency. Grading is long-prompt classification, and

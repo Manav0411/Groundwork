@@ -22,6 +22,7 @@ from app.services.structured_github import commit_by_sha, latest_commit_by_autho
 from app.services.structured_jira import (
     jira_issue_by_key,
     jira_issues_by_assignee,
+    jira_project_status,
     open_jira_blockers,
 )
 
@@ -459,3 +460,59 @@ async def test_an_unknown_hash_is_not_found(session, project) -> None:
     )
 
     assert (await commit_by_sha(session, "test-project", "deadbee1")).status == "not_found"
+
+
+async def test_project_status_counts_the_whole_set(session, project) -> None:
+    """The aggregate limitation, answered by counting instead of by retrieval.
+
+    "Are all the tasks complete?" used to be refused: the grader judges whether a *passage*
+    supports the answer, and no single chunk states a fact about the set. Every chunk was rejected,
+    which was the grader working correctly on a question retrieval cannot answer.
+    """
+    await _ingest_issues(
+        session,
+        [
+            _issue("TEST-1", status="Done", category="done"),
+            _issue("TEST-2", status="Done", category="done"),
+            _issue("TEST-3", status="In Progress", category="indeterminate"),
+            _issue("TEST-4", status="To Do", category="new"),
+        ],
+    )
+
+    status = await jira_project_status(session, "test-project")
+
+    assert status.total == 4
+    assert status.done == 2
+    assert status.complete is False
+    assert {issue.key for issue in status.outstanding} == {"TEST-3", "TEST-4"}
+
+
+async def test_project_status_reports_completion_only_when_everything_is_done(
+    session, project
+) -> None:
+    await _ingest_issues(
+        session,
+        [
+            _issue("TEST-1", status="Done", category="done"),
+            _issue("TEST-2", status="Closed", category="Done"),  # category casing varies by site
+        ],
+    )
+
+    status = await jira_project_status(session, "test-project")
+
+    assert status.total == 2
+    assert status.done == 2
+    assert status.complete is True
+    assert status.outstanding == []
+
+
+async def test_an_empty_project_is_not_a_complete_one(session, project) -> None:
+    """Vacuous truth is the wrong answer here.
+
+    "All zero issues are done" would be a confident yes for a project nobody has synced, which is
+    indistinguishable from a project that really is finished.
+    """
+    status = await jira_project_status(session, "test-project")
+
+    assert status.total == 0
+    assert status.complete is False
