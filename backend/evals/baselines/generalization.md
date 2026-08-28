@@ -72,6 +72,25 @@ policy downgrades stale answers. Asserting a bare `correct` would mean the suite
 minutes after a sync, so it accepts a downgrade when the staleness is disclosed — the contract,
 rather than the convenient half of it.
 
+## What connecting the third source found
+
+Slack was added to `groundwork` after Jira. It moved no counter — the suite asserts deterministic
+paths and Slack is retrieval-only by design — but it surfaced a routing gap that only a second
+project could have exposed.
+
+`BLOCKER_PATTERN` matched `blocker`, `blockers` and `blocked`, but not `blocking` or `blocks`. So
+*"what is blocking the EC2 deployment?"* fell through to retrieval and answered *"blocked due to
+the lack of a hosted API"* — confidently, graded `correct`, with no gap disclosed — while the Jira
+issue carrying the `blocked` label and a comment naming the real reason sat one deterministic lookup
+away. The verb form is at least as natural as the noun.
+
+Fixed, with the over-correction guarded: the pattern now requires a suffix, so "which code block
+changed?" is still not a blocker question.
+
+Worth noting *why* it survived until now. AskBase's eval and conversation cases all phrase this as
+"what blockers are open?", because they were written by the same person who wrote the regex. A
+second corpus prompted a different phrasing, and the phrasing is what broke.
+
 ## Is the suite capable of failing?
 
 A suite that passes on day one has proved nothing until it can be shown to fail. Mutating
@@ -93,8 +112,12 @@ shares code with the thing it checks needs at least one assertion that does not.
   a backlog that grew on its own. It was populated from the project's genuine open work — background
   sync, `/metrics`, rate limiting, the EC2 deploy — rather than filler, which keeps the text real,
   but the corpus did not arrive by accident and that is worth knowing when reading the result.
-- Slack is not yet connected on `groundwork`, so cross-source retrieval is still exercised on
-  `askbase` alone.
+- Slack is connected on `groundwork` (6 threads, one document each). Cross-source retrieval works
+  mechanically — one answer drew 3 Slack citations and 1 GitHub — but see below.
+- **Cross-source answers are not asserted by any suite.** The generalization suite covers
+  deterministic paths only, and what the second project exposed on the retrieval path is recorded
+  in `inference.md`: synthesis reproduces the *direction* of retrieved evidence reliably and its
+  *figures* unreliably.
 - Deterministic-path questions only. Retrieval and synthesis are measured by the conversation suite
   and `retrieval_runner`; asserting a 3B model's phrasing against unseen data would measure
   variance.

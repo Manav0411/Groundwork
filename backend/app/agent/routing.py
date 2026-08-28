@@ -19,7 +19,13 @@ from app.services.structured_jira import extract_assignee, extract_issue_key
 QueryType = str
 
 COMMIT_PATTERN = re.compile(r"\bcommits?\b", re.IGNORECASE)
-BLOCKER_PATTERN = re.compile(r"\bblocke(?:r|rs|d)\b", re.IGNORECASE)
+# "blocking" and "blocks" were missing, and a second project made that visible: "what is
+# blocking the EC2 deployment?" fell through to retrieval and answered from a Slack thread
+# about Ollama, while the Jira issue carrying the `blocked` label sat one deterministic lookup
+# away. The verb form is at least as natural as the noun.
+# A suffix is required, so bare "block" does not match -- "which code block changed?" is not a
+# blocker question.
+BLOCKER_PATTERN = re.compile(r"\bblock(?:er|ers|ed|ing|s)\b", re.IGNORECASE)
 DECISION_PATTERN = re.compile(r"\bdecisions?\b", re.IGNORECASE)
 
 # Superlative commit intent: "the latest commit", "the most recent commit". The structured GitHub

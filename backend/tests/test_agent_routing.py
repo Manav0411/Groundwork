@@ -159,3 +159,29 @@ def test_quantifier_questions_reach_the_counting_tool(query: str) -> None:
 )
 def test_counting_route_does_not_swallow_neighbouring_intents(query: str, expected: str) -> None:
     assert classify_query(query) == expected
+
+
+@pytest.mark.parametrize(
+    "query",
+    [
+        "What is blocking the EC2 deployment?",
+        "What blocks the release?",
+        "Which issues are blocking us?",
+        "What blockers are open?",
+        "What is blocked right now?",
+    ],
+)
+def test_the_verb_form_of_blocker_routes_like_the_noun(query: str) -> None:
+    """Found on a second project, which is the only reason it was found at all.
+
+    The pattern matched blocker/blockers/blocked but not blocking or blocks, so "what is blocking
+    the EC2 deployment?" fell through to retrieval and answered from an unrelated Slack thread
+    about Ollama -- while the Jira issue carrying the `blocked` label sat one deterministic lookup
+    away. The verb form is at least as natural a phrasing as the noun.
+    """
+    assert classify_query(query) == "blocker_investigation"
+
+
+def test_a_bare_block_is_not_a_blocker_question() -> None:
+    """The obvious over-correction: making the suffix optional swallows "a block of code"."""
+    assert classify_query("Which code block changed in the last commit?") != "blocker_investigation"
