@@ -72,6 +72,37 @@ back more than it gains elsewhere, at 4.4x the latency. Grading is long-prompt c
 the 8B model's prompt throughput is 109 tok/s against 362 tok/s. It is the wrong shape of model for
 this job.
 
+### Synthesis fabricates figures, and the validator cannot see it
+
+**Added 2026-08-28**, from cross-source questions on a second project. The corpus there is dense
+with measurements, which made a known weakness legible for the first time. Asked *"why are we using
+llama3.2:3b instead of a bigger model?"* against a Slack thread stating the numbers plainly:
+
+| Evidence says | Answer said |
+|---|---|
+| qwen3:8b **0.900** against llama3.2:3b **0.950** | llama3.2:3b scores "0.900 against qwen3:8b" — attribution inverted |
+| 7.2 tok/s → 40 tok/s (a 5.6x gain) | "improves inference speed by up to **40x**" — read the figure as a multiplier |
+| *(no source states a 4B memory footprint)* | "the 4B model requires **8.6GB**" — invented |
+
+Three runs gave three different sets of numbers. The **direction** was right every time — 4B worse
+on recall, 8B too large to keep resident — and the specifics were unreliable every time.
+
+This was already recorded one notch weaker: llama3.2:3b previously added the ungrounded phrase
+"reduce maintenance burden" to an otherwise cited answer. Adjectives were the earlier symptom;
+figures are the same fault with sharper consequences, because a wrong number carrying a `[1]` that
+validates reads as sourced.
+
+**The limit this exposes is structural, not model-specific.** Citation validation checks that every
+`[n]` resolves to an emitted citation. It does not check that the claim matches the cited text, and
+no cheap check can — that comparison is the same natural-language inference the grader already
+struggles with. So the guarantee this system offers is *"every claim points at real retrieved
+evidence"*, not *"every claim is entailed by it"*. Those are different promises and only the first
+one is enforced.
+
+Not fixed, deliberately. Prompt-only constraints have regressed something else every time they were
+tried in this project, and the model that writes better loses on residency (below). Recorded so the
+claim stays accurate.
+
 ### Synthesis — the larger model writes better, and still loses
 
 `qwen3:8b` is the better writer. Asked why local embeddings were dropped, it cited only the
