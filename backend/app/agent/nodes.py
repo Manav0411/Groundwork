@@ -21,8 +21,9 @@ from app.models.schemas import RetrievalGrade
 from app.services.citations import CITATION_MARKER, validate_citations
 from app.services.grading import grade_retrieval, rewrite_query
 from app.services.llm import (
-    OllamaClient,
     build_answer_prompt,
+    chat_client,
+    embedding_client,
     fallback_answer_from_evidence,
 )
 from app.services.retrieval import hybrid_retrieve, records_to_response
@@ -402,7 +403,7 @@ async def retrieve(state: AgentState) -> AgentState:
                 session,
                 project_id=request.project_id,
                 query=request.query,
-                ollama=OllamaClient(),
+                ollama=embedding_client(),
             )
         step.summary = (
             f"Retrieved {len(records)} persisted chunk(s) with hybrid full-text/vector search."
@@ -420,7 +421,10 @@ async def grade(state: AgentState) -> AgentState:
 
     with state["trace"].step("Retrieval Grader") as step:
         result = await grade_retrieval(
-            request.query, records, ollama=OllamaClient(), corrected=state.get("corrected", False)
+            request.query,
+            records,
+            ollama=chat_client("grader"),
+            corrected=state.get("corrected", False),
         )
         step.summary = result.summary
 
@@ -437,7 +441,7 @@ async def correct(state: AgentState) -> AgentState:
 
     with state["trace"].step(f"Corrective Retrieval {attempt}") as step:
         if attempt == 1:
-            rewritten = await rewrite_query(request.query, OllamaClient())
+            rewritten = await rewrite_query(request.query, chat_client("grader"))
             search_query = rewritten or request.query
             action = (
                 f"rewrote the question as {rewritten!r}"
@@ -454,7 +458,7 @@ async def correct(state: AgentState) -> AgentState:
             project_id=request.project_id,
             query=search_query,
             limit=limit,
-            ollama=OllamaClient(),
+            ollama=embedding_client(),
         )
         step.summary = f"Attempt {attempt}: {action}. Re-retrieved {len(records)} chunk(s)."
 
@@ -527,35 +531,37 @@ async def synthesize(state: AgentState) -> AgentState:
     # Used only when the model is unavailable. It restates retrieved evidence and invents
     # nothing, which is the only honest thing to return without a generator.
     answer = fallback_answer_from_evidence(request.query, evidence_lines)
-    if settings.llm_provider == "ollama":
-        with state["trace"].step("Ollama Answer Generator") as step:
-            try:
-                client = OllamaClient()
-                system_prompt, user_prompt = build_answer_prompt(request.query, evidence_lines)
-                answer = await client.generate(system_prompt, user_prompt)
-                step.summary = f"Generated answer with local model {settings.ollama_model}."
+    # This used to be gated on `settings.llm_provider == "ollama"`, which would have disabled
+    # generation entirely under any other provider -- that one line was the whole of the previous
+    # "provider abstraction". The factory decides which provider serves this role now.
+    with state["trace"].step("Answer Generator") as step:
+        try:
+            client = chat_client("synthesis")
+            system_prompt, user_prompt = build_answer_prompt(request.query, evidence_lines)
+            answer = await client.generate(system_prompt, user_prompt)
+            step.summary = f"Generated answer with {settings.llm_provider} model {client.model}."
 
-                # A good answer that carries no [n] markers is stripped of every citation by the
-                # validator, so it reaches the user looking unsupported when it was not. One
-                # bounded retry with an explicit instruction is cheaper than that outcome, and
-                # more honest than attaching citations the answer never claimed.
-                if not CITATION_MARKER.search(answer):
-                    system_prompt, user_prompt = build_answer_prompt(
-                        request.query, evidence_lines, insist_on_citations=True
-                    )
-                    retried = await client.generate(system_prompt, user_prompt)
-                    if CITATION_MARKER.search(retried):
-                        answer = retried
-                        step.summary += " First attempt cited nothing; retried and it cited."
-                    else:
-                        step.summary += " Cited nothing on both attempts."
-            except Exception as exc:
-                if not settings.llm_fallback_enabled:
-                    raise
-                step.fail(
-                    "Ollama unavailable or model missing; used deterministic "
-                    f"fallback answer. Error: {exc}"
+            # A good answer that carries no [n] markers is stripped of every citation by the
+            # validator, so it reaches the user looking unsupported when it was not. One
+            # bounded retry with an explicit instruction is cheaper than that outcome, and
+            # more honest than attaching citations the answer never claimed.
+            if not CITATION_MARKER.search(answer):
+                system_prompt, user_prompt = build_answer_prompt(
+                    request.query, evidence_lines, insist_on_citations=True
                 )
+                retried = await client.generate(system_prompt, user_prompt)
+                if CITATION_MARKER.search(retried):
+                    answer = retried
+                    step.summary += " First attempt cited nothing; retried and it cited."
+                else:
+                    step.summary += " Cited nothing on both attempts."
+        except Exception as exc:
+            if not settings.llm_fallback_enabled:
+                raise
+            step.fail(
+                f"{settings.llm_provider} provider unavailable or model missing; used "
+                f"deterministic fallback answer. Error: {exc}"
+            )
     return {"answer": answer}
 
 

@@ -21,7 +21,7 @@ from app.connectors.slack import SlackConnector, SlackRateLimitError, SlackThrea
 from app.core.config import settings
 from app.db.models import ConnectorSyncState, Project
 from app.services.ingestion import ingest_documents, slack_thread_documents
-from app.services.llm import OllamaClient
+from app.services.llm import embedding_client
 
 
 @dataclass(frozen=True)
@@ -133,7 +133,7 @@ async def sync_slack_project(
                 )
 
         stats = await ingest_documents(
-            session, slack_thread_documents(project_id, threads), OllamaClient()
+            session, slack_thread_documents(project_id, threads), embedding_client()
         )
         completed_at = datetime.now(UTC)
         state.status = "succeeded"

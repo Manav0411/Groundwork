@@ -61,6 +61,29 @@ class Settings(BaseSettings):
     # conversation; five is well past the point where a pronoun still refers backwards.
     conversation_history_turns: int = Field(default=5, alias="CONVERSATION_HISTORY_TURNS")
 
+    # Hosted chat provider, used only where local inference is not viable. Ollama stays the default
+    # and the only required provider; nothing here is needed to run the project.
+    #
+    # It exists because cloud CPU inference was measured and rejected: a RAG turn takes 67.9s on the
+    # largest instance the AWS Free plan allows, against 8.1s on Metal. Exact-answer questions are
+    # unaffected -- they make no model call at all -- so only generation moves.
+    # See evals/baselines/deployment_inference.md.
+    hosted_base_url: str = Field(
+        default="https://api.groq.com/openai/v1", alias="HOSTED_BASE_URL"
+    )
+    hosted_api_key: str | None = Field(default=None, alias="GROQ_API_KEY")
+    # Model ids are configuration, never literals. Groq retired llama-3.1-8b-instant and
+    # llama-3.3-70b-versatile in August 2026, mid-plan; the next retirement should be an env change.
+    # Qwen was available but is preview-only ("may be discontinued with limited notice"), which
+    # rules it out for anything that has to keep working.
+    hosted_model: str = Field(default="openai/gpt-oss-120b", alias="HOSTED_MODEL")
+    hosted_grader_model: str = Field(default="openai/gpt-oss-20b", alias="HOSTED_GRADER_MODEL")
+    # The counterpart of `ollama_think`, and the same trap. Measured on gpt-oss-20b for a
+    # grading-shaped call: default effort spent 190 of 205 completion tokens on reasoning against
+    # 25 of 63 at "low", for 3x the latency on a job that returns one bit. Free-tier tokens are
+    # capped per minute, so the waste costs budget as well as time.
+    hosted_reasoning_effort: str = Field(default="low", alias="HOSTED_REASONING_EFFORT")
+
     embedding_provider: str = Field(default="ollama", alias="EMBEDDING_PROVIDER")
     embedding_model: str = Field(default="embeddinggemma", alias="EMBEDDING_MODEL")
     embedding_dimension: int = Field(default=768, alias="EMBEDDING_DIMENSION")

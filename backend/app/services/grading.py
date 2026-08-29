@@ -14,7 +14,7 @@ from dataclasses import dataclass
 
 from app.core.config import settings
 from app.models.schemas import RetrievalGrade
-from app.services.llm import OllamaClient
+from app.services.llm import ChatClient, chat_client
 from app.services.retrieval import RetrievedRecord
 
 SYSTEM_PROMPT = """Decide whether search results contain the information a question asks for.
@@ -111,7 +111,7 @@ async def grade_retrieval(
     query: str,
     records: list[RetrievedRecord],
     *,
-    ollama: OllamaClient | None = None,
+    ollama: ChatClient | None = None,
     corrected: bool = False,
 ) -> GradeResult:
     """Judge which retrieved chunks actually support an answer to `query`.
@@ -126,15 +126,10 @@ async def grade_retrieval(
     if not settings.grader_enabled:
         return _derived_grade(records, "grader disabled by configuration")
 
-    client = ollama or OllamaClient()
+    client = ollama or chat_client("grader")
     system_prompt, user_prompt = build_grading_prompt(query, records)
     try:
-        payload = await client.generate_json(
-            system_prompt,
-            user_prompt,
-            model=settings.grader_model,
-            timeout_seconds=settings.grader_timeout_seconds,
-        )
+        payload = await client.generate_json(system_prompt, user_prompt)
         verdict = parse_verdict(payload)
     except Exception as exc:
         if not settings.llm_fallback_enabled:
@@ -166,6 +161,7 @@ async def grade_retrieval(
         used_model=True,
     )
 
+
 REWRITE_SYSTEM_PROMPT = (
     "You rewrite an engineering question so a keyword-and-embedding search over commit messages "
     "and issue trackers is more likely to match it. Keep the meaning identical. Prefer concrete "
@@ -174,7 +170,7 @@ REWRITE_SYSTEM_PROMPT = (
 )
 
 
-async def rewrite_query(query: str, ollama: OllamaClient | None = None) -> str | None:
+async def rewrite_query(query: str, ollama: ChatClient | None = None) -> str | None:
     """Restate a question in terms closer to how the corpus is written.
 
     Worth doing only because Phase 2 revived the lexical retriever: while the tsquery ANDed every
@@ -182,14 +178,9 @@ async def rewrite_query(query: str, ollama: OllamaClient | None = None) -> str |
     the model is unavailable or gives back something unusable, so the caller can skip the attempt
     rather than retry with a degraded query.
     """
-    client = ollama or OllamaClient()
+    client = ollama or chat_client("grader")
     try:
-        payload = await client.generate_json(
-            REWRITE_SYSTEM_PROMPT,
-            f"Question: {query}",
-            model=settings.grader_model,
-            timeout_seconds=settings.grader_timeout_seconds,
-        )
+        payload = await client.generate_json(REWRITE_SYSTEM_PROMPT, f"Question: {query}")
     except Exception:
         return None
     rewritten = str(payload.get("query") or "").strip()

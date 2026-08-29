@@ -29,10 +29,9 @@ from app.agent.routing import (
     DECISION_PATTERN,
     LATEST_PATTERN,
 )
-from app.core.config import settings
 from app.models.schemas import ConversationTurn
 from app.services.citations import CITATION_MARKER
-from app.services.llm import OllamaClient
+from app.services.llm import ChatClient, chat_client
 from app.services.structured_github import (
     ORDINAL_PATTERN,
     PREVIOUS_PATTERN,
@@ -315,7 +314,7 @@ def build_history_prompt(history: list[ConversationTurn], query: str) -> str:
 async def resolve_followup(
     query: str,
     history: list[ConversationTurn],
-    ollama: OllamaClient | None = None,
+    ollama: ChatClient | None = None,
 ) -> str | None:
     """Rewrite a follow-up into a standalone question, or return None to use the original.
 
@@ -324,13 +323,10 @@ async def resolve_followup(
     """
     if not history:
         return None
-    client = ollama or OllamaClient()
+    client = ollama or chat_client("grader")
     try:
         payload = await client.generate_json(
-            RESOLUTION_SYSTEM_PROMPT,
-            build_history_prompt(history, query),
-            model=settings.grader_model,
-            timeout_seconds=settings.grader_timeout_seconds,
+            RESOLUTION_SYSTEM_PROMPT, build_history_prompt(history, query)
         )
     except Exception:
         return None
