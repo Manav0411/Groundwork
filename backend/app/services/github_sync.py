@@ -9,7 +9,7 @@ from app.connectors.github import GitHubConnector, GitHubRateLimitError
 from app.core.config import settings
 from app.db.models import ConnectorSyncState, Project
 from app.services.ingestion import github_commit_documents, ingest_documents
-from app.services.llm import OllamaClient
+from app.services.llm import embedding_client
 
 
 @dataclass(frozen=True)
@@ -106,7 +106,7 @@ async def sync_github_project(
         stats = await ingest_documents(
             session,
             github_commit_documents(project_id, result.commits),
-            OllamaClient(),
+            embedding_client(),
         )
         completed_at = datetime.now(UTC)
         state.status = "succeeded"

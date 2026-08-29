@@ -25,7 +25,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app.core.config import settings
 from app.services.grading import grade_retrieval
-from app.services.llm import OllamaClient
+from app.services.llm import chat_client, embedding_client
 from app.services.retrieval import hybrid_retrieve
 from evals.retrieval_models import RetrievalCase
 from evals.retrieval_runner import _document_external_ids, load_cases
@@ -68,19 +68,25 @@ class GradingSummary(BaseModel):
 async def run(cases: list[RetrievalCase], *, dataset_name: str) -> GradingSummary:
     engine = create_async_engine(settings.database_url)
     factory = async_sessionmaker(engine, expire_on_commit=False)
-    ollama = OllamaClient()
+    # One client used to serve both roles here, which silently pinned this harness to Ollama: with
+    # LLM_PROVIDER=openai_compat set, it still reported llama3.2:3b numbers. Embeddings must stay
+    # local, and the grader must follow the configured provider, or the harness cannot measure the
+    # thing being shipped.
+    embedder = embedding_client()
+    grader = chat_client("grader")
+    grader_model = grader.model
     results: list[GradingCaseResult] = []
     try:
         async with factory() as session:
             for case in cases:
                 records = await hybrid_retrieve(
-                    session, project_id=case.project_id, query=case.query, ollama=ollama
+                    session, project_id=case.project_id, query=case.query, ollama=embedder
                 )
                 by_document = await _document_external_ids(session, records)
                 relevant = set(case.relevant_external_ids)
 
                 started = time.perf_counter()
-                grade = await grade_retrieval(case.query, records, ollama=ollama)
+                grade = await grade_retrieval(case.query, records, ollama=grader)
                 duration_ms = round((time.perf_counter() - started) * 1000)
 
                 kept_ids = {by_document.get(record.document_id) for record in grade.kept}
@@ -128,7 +134,7 @@ async def run(cases: list[RetrievalCase], *, dataset_name: str) -> GradingSummar
     return GradingSummary(
         dataset=dataset_name,
         completed_at=datetime.now(UTC).isoformat(),
-        grader_model=settings.grader_model,
+        grader_model=grader_model,
         total_cases=len(results),
         sufficiency_accuracy=sum(item.sufficiency_correct for item in results) / len(results),
         negatives_correct=sum(item.sufficiency_correct for item in negatives),

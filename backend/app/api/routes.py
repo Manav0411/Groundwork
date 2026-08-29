@@ -1,3 +1,4 @@
+import asyncio
 from dataclasses import asdict
 from typing import Annotated
 
@@ -25,7 +26,7 @@ from app.models.schemas import (
 from app.services.github_sync import GitHubSyncInProgressError, sync_github_project
 from app.services.ingestion import seed_synthetic_workspace
 from app.services.jira_sync import JiraSyncInProgressError, sync_jira_project
-from app.services.llm import OllamaClient
+from app.services.llm import chat_client, embedding_client
 from app.services.persistence import (
     ConversationNotFoundError,
     load_conversation_history,
@@ -58,8 +59,21 @@ async def health() -> dict[str, str]:
 
 @router.get("/health/ollama")
 async def ollama_health() -> dict[str, object]:
-    health = await OllamaClient().health()
-    return health.__dict__
+    """Report the chat and embedding providers separately, because they can now differ.
+
+    In a deployed configuration chat runs on a hosted API while embeddings stay local, so a single
+    status would hide exactly the failure this arrangement introduces: a healthy chat provider and
+    a dead embedder still means retrieval returns nothing. The path keeps its name because the
+    frontend proxy allowlist matches it.
+    """
+    chat, embeddings = await asyncio.gather(
+        chat_client("synthesis").health(), embedding_client().health()
+    )
+    return {
+        **chat.__dict__,
+        "role": "chat",
+        "embeddings": {**embeddings.__dict__, "role": "embeddings"},
+    }
 
 
 @router.get("/health/database")

@@ -9,7 +9,7 @@ from app.connectors.jira import JiraConnector, JiraRateLimitError
 from app.core.config import settings
 from app.db.models import ConnectorSyncState, Project
 from app.services.ingestion import ingest_documents, jira_issue_documents
-from app.services.llm import OllamaClient
+from app.services.llm import embedding_client
 
 
 @dataclass(frozen=True)
@@ -108,7 +108,7 @@ async def sync_jira_project(
         stats = await ingest_documents(
             session,
             jira_issue_documents(project_id, result.issues),
-            OllamaClient(),
+            embedding_client(),
         )
         completed_at = datetime.now(UTC)
         project.jira_project_key = jira_project_key
