@@ -3,15 +3,20 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.routes import router
 from app.core.config import settings
+from app.core.observability import RequestLoggingMiddleware, configure_logging
 from app.core.ratelimit import RateLimitMiddleware
 
 
 def create_app() -> FastAPI:
+    configure_logging()
     app = FastAPI(
         title="Groundwork",
         version="0.1.0",
         description="Engineering project intelligence with cited evidence.",
     )
+    # Registered last so it runs first: a request rejected by the rate limiter should still produce
+    # a log line, or the one thing you most want to see is the one thing that is invisible.
+    app.add_middleware(RequestLoggingMiddleware)
     # Added before CORS so it runs *after* it: Starlette applies middleware in reverse order of
     # registration. A rejected request should still carry CORS headers, or a throttled browser sees
     # an opaque network error instead of the 429 that explains itself.

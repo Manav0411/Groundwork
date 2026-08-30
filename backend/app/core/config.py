@@ -139,6 +139,8 @@ class Settings(BaseSettings):
     # script. Exact-answer questions make no model call at all and are counted the same, which is
     # deliberate: the alternative is classifying the query in middleware to decide how to count it,
     # duplicating routing work to save a budget that is not actually under pressure from them.
+    log_level: str = Field(default="INFO", alias="LOG_LEVEL")
+
     rate_limit_enabled: bool = Field(default=True, alias="RATE_LIMIT_ENABLED")
     rate_limit_per_client: int = Field(default=20, alias="RATE_LIMIT_PER_CLIENT")
     rate_limit_global: int = Field(default=60, alias="RATE_LIMIT_GLOBAL")

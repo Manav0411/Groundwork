@@ -6,6 +6,7 @@ from typing import Literal, Protocol
 import httpx
 
 from app.core.config import settings
+from app.core.observability import LLM_CALLS
 
 
 class LLMProviderError(RuntimeError):
@@ -358,6 +359,65 @@ class OpenAICompatClient:
 ChatRole = Literal["grader", "synthesis"]
 
 
+class _CountingChatClient:
+    """Records the outcome of every model call, then gets out of the way.
+
+    A wrapper rather than a mixin because `OllamaClient` also embeds, and embedding is not a chat
+    call. Failures are counted and re-raised unchanged: the caller's fallback behaviour is the
+    product's contract and must not shift because something is watching.
+    """
+
+    def __init__(self, inner: ChatClient, *, provider: str, role: str) -> None:
+        self._inner = inner
+        self._provider = provider
+        self._role = role
+
+    @property
+    def model(self) -> str:
+        return self._inner.model
+
+    @property
+    def provider(self) -> str:
+        """Which provider actually serves this role. Exposed so callers and tests can assert the
+        resolution without reaching through the wrapper for a concrete class."""
+        return self._provider
+
+    async def health(self) -> LLMHealth:
+        return await self._inner.health()
+
+    async def _counted(self, coro):
+        try:
+            result = await coro
+        except LLMProviderError as exc:
+            outcome = "rate_limited" if "Rate limited" in str(exc) else "provider_error"
+            LLM_CALLS.labels(provider=self._provider, role=self._role, outcome=outcome).inc()
+            raise
+        except Exception:
+            LLM_CALLS.labels(
+                provider=self._provider, role=self._role, outcome="error"
+            ).inc()
+            raise
+        LLM_CALLS.labels(provider=self._provider, role=self._role, outcome="ok").inc()
+        return result
+
+    async def generate_json(
+        self,
+        system_prompt: str,
+        user_prompt: str,
+        *,
+        model: str | None = None,
+        timeout_seconds: float | None = None,
+    ) -> dict:
+        return await self._counted(
+            self._inner.generate_json(
+                system_prompt, user_prompt, model=model, timeout_seconds=timeout_seconds
+            )
+        )
+
+    async def generate(self, system_prompt: str, user_prompt: str) -> str:
+        return await self._counted(self._inner.generate(system_prompt, user_prompt))
+
+
 def chat_client(role: ChatRole) -> ChatClient:
     """Build the chat client for one role, resolving provider, model and timeout together.
 
@@ -373,9 +433,13 @@ def chat_client(role: ChatRole) -> ChatClient:
     timeout = settings.grader_timeout_seconds if is_grader else settings.llm_timeout_seconds
     if settings.llm_provider == "openai_compat":
         model = settings.hosted_grader_model if is_grader else settings.hosted_model
-        return OpenAICompatClient(model=model, timeout_seconds=timeout)
-    model = settings.grader_model if is_grader else settings.ollama_model
-    return OllamaClient(model=model, timeout_seconds=timeout)
+        client: ChatClient = OpenAICompatClient(model=model, timeout_seconds=timeout)
+    else:
+        model = settings.grader_model if is_grader else settings.ollama_model
+        client = OllamaClient(model=model, timeout_seconds=timeout)
+    # Counted here rather than inside each client, so both providers report identically and a third
+    # implementation cannot forget to.
+    return _CountingChatClient(client, provider=settings.llm_provider, role=role)
 
 
 def embedding_client() -> OllamaClient:

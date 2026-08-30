@@ -10,6 +10,7 @@ a graph — but the corrective loop does, and expressing it as edges makes the c
 inspectable rather than buried in a while loop.
 """
 
+import time
 from uuid import uuid4
 
 from langgraph.graph import END, START, StateGraph
@@ -21,6 +22,7 @@ from app.agent.state import AgentState
 from app.agent.tracing import TraceRecorder
 from app.connectors.synthetic_workspace import get_projects
 from app.core.config import settings
+from app.core.observability import CORRECTIVE_ATTEMPTS, QUERIES, QUERY_SECONDS, logger
 from app.db.models import Project
 from app.models.schemas import ConversationTurn, QueryRequest, QueryResponse
 from app.services.ingestion import upsert_project
@@ -170,8 +172,30 @@ async def run_agent(request: QueryRequest, session: AsyncSession | None = None) 
     }
     # The corrective cycle is bounded by `corrective_max_attempts`, but give LangGraph a hard stop
     # too, so a routing bug can never produce an unbounded loop in production.
+    started = time.perf_counter()
     final = await AGENT_GRAPH.ainvoke(
         initial, config={"recursion_limit": 8 + settings.corrective_max_attempts * 4}
+    )
+    duration = time.perf_counter() - started
+
+    route = final["query_type"]
+    QUERIES.labels(route=route, grade=final["retrieval_grade"]).inc()
+    QUERY_SECONDS.labels(route=route).observe(duration)
+    if final.get("attempt"):
+        CORRECTIVE_ATTEMPTS.inc(final["attempt"])
+    # The fields an operator would actually want when a report says "it gave a bad answer": which
+    # route, what grade, how many citations, and whether correction had to run.
+    logger.info(
+        "query answered",
+        extra={
+            "project": request.project_id,
+            "route": route,
+            "grade": final["retrieval_grade"],
+            "citations": len(final["citations"]),
+            "corrective_attempts": final.get("attempt", 0),
+            "resolved": final.get("resolved_query") is not None,
+            "duration_ms": round(duration * 1000),
+        },
     )
 
     response = QueryResponse(

@@ -3,7 +3,7 @@ from dataclasses import asdict
 from typing import Annotated
 
 import httpx
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Response
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -11,9 +11,10 @@ from app.agent.graph import run_agent
 from app.connectors.github import GitHubRateLimitError
 from app.connectors.jira import JiraRateLimitError
 from app.connectors.slack import SlackAPIError, SlackRateLimitError
+from app.core.observability import SYNCS, logger, render_metrics
 from app.core.security import require_api_key
 from app.db.models import ConnectorSyncState, Project, SourceDocument
-from app.db.session import get_optional_session, get_session
+from app.db.session import SessionFactory, get_optional_session, get_session
 from app.models.schemas import (
     JiraProjectConfig,
     ProjectCreate,
@@ -33,6 +34,12 @@ from app.services.persistence import (
     load_trace,
 )
 from app.services.slack_sync import SlackSyncInProgressError, sync_slack_project
+
+SYNC_RUNNERS = {
+    "github": sync_github_project,
+    "jira": sync_jira_project,
+    "slack": sync_slack_project,
+}
 
 router = APIRouter()
 DatabaseSession = Annotated[AsyncSession, Depends(get_session)]
@@ -76,6 +83,18 @@ async def ollama_health() -> dict[str, object]:
     }
 
 
+@router.get("/metrics", dependencies=[Depends(require_api_key)])
+async def metrics() -> Response:
+    """Prometheus exposition.
+
+    Behind the API key like everything else. Usage volume and error rates are not secrets exactly,
+    but the endpoint is public and there is no reason to hand a stranger a map of how the demo is
+    doing.
+    """
+    payload, content_type = render_metrics()
+    return Response(content=payload, media_type=content_type)
+
+
 @router.get("/health/database")
 async def database_health(
     session: OptionalDatabaseSession,
@@ -105,6 +124,79 @@ async def query(
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
+async def _run_sync_detached(source: str, project_id: str, limit: int | None) -> None:
+    """Run one sync on its own session, after the response has gone.
+
+    A fresh session is not optional. The request-scoped one is closed as soon as the response is
+    sent, so reusing it here fails somewhere inside the connector with an error about a closed
+    connection rather than anything that names the real cause.
+
+    Nothing is raised. The caller is gone; the outcome is already durable in
+    `connector_sync_states`, which is what the status endpoint reads, and it is logged and counted
+    here so a failure is visible without querying the database.
+    """
+    kwargs = {"max_commits": limit} if source == "github" else (
+        {"max_issues": limit} if source == "jira" else {"max_messages": limit}
+    )
+    try:
+        async with SessionFactory() as session:
+            report = await SYNC_RUNNERS[source](session, project_id, **kwargs)
+        SYNCS.labels(source=source, outcome="succeeded").inc()
+        logger.info(
+            "background sync finished",
+            extra={
+                "source": source,
+                "project": project_id,
+                "documents": getattr(report, "documents", None),
+                "embedded": getattr(report, "embedded", None),
+            },
+        )
+    except Exception as exc:
+        SYNCS.labels(source=source, outcome="failed").inc()
+        logger.exception(
+            "background sync failed",
+            extra={"source": source, "project": project_id, "error": str(exc)[:200]},
+        )
+
+
+async def _start_background_sync(
+    background_tasks: BackgroundTasks,
+    session: AsyncSession,
+    source: str,
+    project_id: str,
+    limit: int | None,
+) -> dict[str, object]:
+    """Accept a sync for later, rejecting up front what can be rejected up front.
+
+    An unknown project and an already-running sync are both answered synchronously, because a 202
+    for work that was never going to happen is worse than a slow response: the caller polls a status
+    that never changes and has nothing to explain why.
+    """
+    if await session.get(Project, project_id) is None:
+        raise HTTPException(status_code=404, detail=f"Project {project_id!r} does not exist.")
+
+    state = (
+        await session.execute(
+            select(ConnectorSyncState).where(
+                ConnectorSyncState.project_id == project_id,
+                ConnectorSyncState.source_type == source,
+            )
+        )
+    ).scalar_one_or_none()
+    if state is not None and state.status == "running":
+        raise HTTPException(
+            status_code=409, detail=f"A {source} sync for {project_id!r} is already running."
+        )
+
+    background_tasks.add_task(_run_sync_detached, source, project_id, limit)
+    return {
+        "status": "accepted",
+        "project_id": project_id,
+        "source": source,
+        "poll": f"/projects/{project_id}/sync/{source}",
+    }
+
+
 @router.post("/ingest/workspace", dependencies=[Depends(require_api_key)])
 async def ingest_workspace(session: DatabaseSession) -> dict[str, object]:
     stats = await seed_synthetic_workspace(session)
@@ -115,8 +207,20 @@ async def ingest_workspace(session: DatabaseSession) -> dict[str, object]:
 async def sync_project_github(
     project_id: str,
     session: DatabaseSession,
+    background_tasks: BackgroundTasks,
     max_commits: int | None = None,
+    background: bool = False,
 ) -> dict[str, object]:
+    """Sync GitHub. `background=true` returns immediately and the caller polls the status endpoint.
+
+    Synchronous by default, deliberately. The eval harness posts a sync and queries straight
+    afterwards, so flipping the default would leave the release gates passing against stale data --
+    which is worse than failing, because nothing would say so.
+    """
+    if background:
+        return await _start_background_sync(
+            background_tasks, session, "github", project_id, max_commits
+        )
     return await _sync_github_project(session, project_id, max_commits)
 
 
@@ -167,8 +271,15 @@ async def configure_project_jira(
 async def sync_project_jira(
     project_id: str,
     session: DatabaseSession,
+    background_tasks: BackgroundTasks,
     max_issues: int | None = None,
+    background: bool = False,
 ) -> dict[str, object]:
+    """Sync Jira. See `sync_project_github` for why synchronous is the default."""
+    if background:
+        return await _start_background_sync(
+            background_tasks, session, "jira", project_id, max_issues
+        )
     try:
         report = await sync_jira_project(session, project_id, max_issues=max_issues)
     except LookupError as exc:
@@ -212,8 +323,15 @@ async def configure_project_slack(
 async def sync_project_slack(
     project_id: str,
     session: DatabaseSession,
+    background_tasks: BackgroundTasks,
     max_messages: int | None = None,
+    background: bool = False,
 ) -> dict[str, object]:
+    """Sync Slack. See `sync_project_github` for why synchronous is the default."""
+    if background:
+        return await _start_background_sync(
+            background_tasks, session, "slack", project_id, max_messages
+        )
     try:
         report = await sync_slack_project(session, project_id, max_messages=max_messages)
     except LookupError as exc:
