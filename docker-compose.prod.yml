@@ -15,6 +15,12 @@
 services:
   postgres:
     ports: !reset []
+    # Without this the demo is broken in exactly the way that is hardest to notice. The instance is
+    # stopped between demos to avoid paying for it; on restart the backend and Caddy came back and
+    # Postgres did not, so the site loaded, answered every question with a failure, and looked like
+    # an application bug. Found by actually stopping and starting the instance rather than by
+    # reading the file.
+    restart: unless-stopped
 
   backend:
     ports: !reset []
