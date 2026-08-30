@@ -341,3 +341,78 @@ async def test_a_quantifier_question_is_counted_and_graded_correct(
     assert "TEST-2" in body["answer"]
     # The outstanding work is cited, so the count is auditable rather than asserted.
     assert body["citations"]
+
+
+async def test_a_background_sync_is_accepted_and_pollable(session, project, client) -> None:
+    """The point of the flag: return before the work is done, and say where to look.
+
+    The connector will fail without credentials, which is fine and is the interesting half -- the
+    request must still come back immediately rather than propagating that failure to a caller who
+    has already been told the work was accepted.
+    """
+    response = await client.post(
+        "/projects/test-project/sync/github?background=true", headers=HEADERS
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "accepted"
+    assert body["poll"] == "/projects/test-project/sync/github"
+
+    # And the status endpoint it points at actually exists.
+    status = await client.get(body["poll"], headers=HEADERS)
+    assert status.status_code == 200
+
+
+async def test_a_background_sync_rejects_an_unknown_project_up_front(session, client) -> None:
+    """A 202 for work that was never going to happen is worse than a slow response.
+
+    The caller would poll a status that never changes, with nothing to explain why.
+    """
+    response = await client.post(
+        "/projects/does-not-exist/sync/github?background=true", headers=HEADERS
+    )
+
+    assert response.status_code == 404
+
+
+async def test_a_background_sync_refuses_to_stack_on_a_running_one(
+    session, project, client
+) -> None:
+    """The in-progress guard already exists in the sync services; this checks it is reached
+    before scheduling rather than after, when it would be too late to tell the caller."""
+    from datetime import UTC, datetime
+
+    from app.db.models import ConnectorSyncState
+
+    session.add(
+        ConnectorSyncState(
+            project_id="test-project",
+            source_type="github",
+            status="running",
+            last_started_at=datetime.now(UTC),
+        )
+    )
+    await session.commit()
+
+    response = await client.post(
+        "/projects/test-project/sync/github?background=true", headers=HEADERS
+    )
+
+    assert response.status_code == 409
+    assert "already running" in response.json()["detail"]
+
+
+async def test_the_default_is_still_synchronous(session, project, client) -> None:
+    """Flipping the default would leave the eval gates passing against stale data.
+
+    The harness posts a sync and queries immediately; a silent 202 would mean it measured whatever
+    was there before. That is worse than failing, because nothing would say so.
+    """
+    import inspect
+
+    from app.api import routes
+
+    signature = inspect.signature(routes.sync_project_github)
+
+    assert signature.parameters["background"].default is False
