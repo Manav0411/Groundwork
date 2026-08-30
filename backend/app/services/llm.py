@@ -48,6 +48,18 @@ class ChatClient(Protocol):
     async def generate(self, system_prompt: str, user_prompt: str) -> str: ...
 
 
+def _model_installed(configured: str, installed: list[str]) -> bool:
+    """Match a configured model against what `/api/tags` reports.
+
+    Ollama treats a bare name as `:latest` but always reports the explicit tag, so a plain string
+    comparison says `embeddinggemma` is missing when `embeddinggemma:latest` is right there. Latent
+    until the embedder got its own health check: `llama3.2:3b` carries a tag and matched, the
+    embedding model does not and never did.
+    """
+    wanted = configured if ":" in configured else f"{configured}:latest"
+    return wanted in installed
+
+
 class OllamaClient:
     def __init__(
         self,
@@ -72,13 +84,14 @@ class OllamaClient:
                 error=str(exc),
             )
 
+        installed = _model_installed(self.model, installed_models)
         return LLMHealth(
             provider="ollama",
-            available=self.model in installed_models,
+            available=installed,
             base_url=self.base_url,
             configured_model=self.model,
             installed_models=installed_models,
-            error=None if self.model in installed_models else "Configured model is not installed.",
+            error=None if installed else "Configured model is not installed.",
         )
 
     async def list_models(self) -> list[str]:
@@ -366,8 +379,15 @@ def chat_client(role: ChatRole) -> ChatClient:
 
 
 def embedding_client() -> OllamaClient:
-    """Embeddings are always local. See `ChatClient` for why this cannot be configurable."""
-    return OllamaClient()
+    """Embeddings are always local. See `ChatClient` for why this cannot be configurable.
+
+    The model is passed explicitly so `health()` reports on the embedder. `embed()` reads
+    `settings.embedding_model` directly and always worked, but `health()` reads `self.model`, which
+    defaulted to the *chat* model. That was invisible while one box held both; on a deployment that
+    pulls only the embedder it reported a correctly-configured embedder as unavailable, which is a
+    false alarm pointing at the wrong component.
+    """
+    return OllamaClient(model=settings.embedding_model)
 
 
 def fallback_answer_from_evidence(query: str, evidence_lines: list[str]) -> str:

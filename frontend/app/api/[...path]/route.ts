@@ -10,6 +10,14 @@
  * in the server process. `API_BASE_URL` and `APP_API_KEY` are deliberately *not* NEXT_PUBLIC.
  */
 
+/**
+ * Vercel functions default to 10 seconds, which is comfortable for a query — a RAG turn measures
+ * ~1.5s against the deployed backend — and not for a sync. Syncs still run inside the request that
+ * triggers them, and a first sync fetches, chunks and embeds every commit. Fluid Compute allows up
+ * to 300s on the Hobby plan, so this buys the headroom until background sync exists.
+ */
+export const maxDuration = 300;
+
 const backendBaseUrl = process.env.API_BASE_URL ?? "http://localhost:8000";
 const apiKey = process.env.APP_API_KEY ?? "change-me";
 

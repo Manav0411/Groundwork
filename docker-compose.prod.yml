@@ -1,0 +1,56 @@
+# Production overlay. Use with:
+#     docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+#
+# Three differences from local, each for a reason:
+#
+#   * Nothing is published except Caddy. Locally Postgres publishes 5432/5433 and the backend
+#     publishes 8000, which is convenient on a laptop and would be an open database and an
+#     unauthenticated-by-default API on a public IP. Here they are reachable only on the Docker
+#     network, and the security group opens only 80 and 443.
+#   * Caddy terminates TLS. The frontend runs on Vercel and calls this backend across the public
+#     internet carrying an API key, so plain HTTP would put that key and every question and answer
+#     on the wire in clear text.
+#   * The frontend service is behind a profile, because Vercel serves it.
+
+services:
+  postgres:
+    ports: !reset []
+
+  backend:
+    ports: !reset []
+    environment:
+      # Ollama runs on the host, not in a container: it serves embeddings only. The chat model is
+      # deliberately absent -- a RAG turn measured 67.9s on this instance class against 8.1s on
+      # Metal, so generation goes to a hosted provider. See baselines/deployment_inference.md.
+      OLLAMA_BASE_URL: http://host.docker.internal:11434
+      LLM_PROVIDER: openai_compat
+    restart: unless-stopped
+
+  frontend:
+    # Served by Vercel. Kept here so `--profile local-frontend` still runs the whole stack on one
+    # box, which is what the README describes for local use.
+    profiles: ["local-frontend"]
+
+  caddy:
+    image: caddy:2-alpine
+    container_name: groundwork-caddy
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      # The duckdns name pointed at this instance's Elastic IP. Caddy obtains and renews a Let's
+      # Encrypt certificate for it automatically; port 80 stays open for the ACME challenge.
+      DOMAIN: ${DOMAIN:?set DOMAIN to the public hostname}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - backend
+
+volumes:
+  caddy_data:
+    name: groundwork_caddy_data
+  caddy_config:
+    name: groundwork_caddy_config
