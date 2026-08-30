@@ -71,12 +71,12 @@ def test_the_factory_resolves_role_to_provider_and_model(monkeypatch: pytest.Mon
     into a module that should not know which provider is configured.
     """
     monkeypatch.setattr(settings, "llm_provider", "ollama")
-    assert isinstance(chat_client("grader"), OllamaClient)
+    assert chat_client("grader").provider == "ollama"
     assert chat_client("grader").model == settings.grader_model
     assert chat_client("synthesis").model == settings.ollama_model
 
     monkeypatch.setattr(settings, "llm_provider", "openai_compat")
-    assert isinstance(chat_client("grader"), OpenAICompatClient)
+    assert chat_client("grader").provider == "openai_compat"
     assert chat_client("grader").model == settings.hosted_grader_model
     assert chat_client("synthesis").model == settings.hosted_model
 

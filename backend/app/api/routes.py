@@ -3,7 +3,7 @@ from dataclasses import asdict
 from typing import Annotated
 
 import httpx
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Response
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -11,6 +11,7 @@ from app.agent.graph import run_agent
 from app.connectors.github import GitHubRateLimitError
 from app.connectors.jira import JiraRateLimitError
 from app.connectors.slack import SlackAPIError, SlackRateLimitError
+from app.core.observability import render_metrics
 from app.core.security import require_api_key
 from app.db.models import ConnectorSyncState, Project, SourceDocument
 from app.db.session import get_optional_session, get_session
@@ -74,6 +75,18 @@ async def ollama_health() -> dict[str, object]:
         "role": "chat",
         "embeddings": {**embeddings.__dict__, "role": "embeddings"},
     }
+
+
+@router.get("/metrics", dependencies=[Depends(require_api_key)])
+async def metrics() -> Response:
+    """Prometheus exposition.
+
+    Behind the API key like everything else. Usage volume and error rates are not secrets exactly,
+    but the endpoint is public and there is no reason to hand a stranger a map of how the demo is
+    doing.
+    """
+    payload, content_type = render_metrics()
+    return Response(content=payload, media_type=content_type)
 
 
 @router.get("/health/database")

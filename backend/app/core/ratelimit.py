@@ -23,6 +23,7 @@ from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from app.core.config import settings
+from app.core.observability import RATE_LIMITED
 
 # Uptime checks must never be rate limited: an alert that fires because monitoring got throttled is
 # worse than no alert. It touches no model and no database.
@@ -112,6 +113,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
             scope = "global"
 
         if not allowed:
+            RATE_LIMITED.labels(scope=scope).inc()
             return JSONResponse(
                 status_code=429,
                 content={
