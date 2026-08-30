@@ -1,282 +1,287 @@
 # Groundwork
 
-Engineering knowledge, with evidence. A self-hosted agent that answers questions about your engineering projects from GitHub and Jira, and cites every claim.
+**Engineering knowledge, with evidence.** A self-hosted agent that answers questions about your
+engineering projects from GitHub, Jira and Slack, and cites every claim.
 
-The system answers questions like:
+**Live demo → https://groundwork-mauve-two.vercel.app**
 
-- "Generate a weekly brief for Project Atlas."
-- "What blockers are delaying Project Atlas?"
-- "What was the last commit by Raghav on Project Atlas?"
-- "What is the status of ASK-6?"
-- "What blockers are open in AskBase?"
-- "What decisions were made about the database migration?"
+> The demo backend runs on an EC2 instance that is stopped between sessions to keep it inside a free
+> tier. If questions fail, the box is asleep rather than broken.
 
-The project is free-first: Ollama/local open models are the default, PostgreSQL + pgvector is self-hosted, and paid LLM APIs are not required.
+It answers two different kinds of question by two different mechanisms, on purpose:
 
-## Current implementation
+| Question | How | Latency |
+|---|---|---|
+| *"What was the last commit by Manav0411?"* | Typed SQL over normalized identities | **20–40 ms**, zero model calls |
+| *"What is the status of GW-3?"* | Typed SQL | 20–40 ms |
+| *"Are all the tasks complete?"* | SQL counting by status category | 20–40 ms |
+| *"Why did we choose the grader model?"* | Hybrid retrieval → grade → cited synthesis | ~1.6 s |
 
-- `backend/` — FastAPI backend with a deterministic intent router
-- `frontend/` — Next.js demo UI
-- `docker-compose.yml` — Postgres, backend, frontend (Ollama runs on the host; see Local setup)
+Exact questions have exactly one right answer, decided by ordering or counting. Routing those
+through embedding similarity does not make the system more general, it makes it confidently wrong —
+cosine similarity has no concept of `max(commit_time)`. So they never touch a model at all.
 
-The backend persists projects, source documents, chunks, conversations, query runs, citations,
-retrieved evidence, and agent traces. Retrieval combines PostgreSQL full-text search with pgvector
-cosine similarity and falls back to full-text search when embeddings are offline. Exact questions
-("latest commit by X", "status of ASK-6") bypass semantic retrieval entirely and are answered by
-typed SQL, so embedding similarity never decides factual ordering.
+The project is **free-first**: Ollama and local open models are the default, PostgreSQL + pgvector is
+self-hosted, and no paid API is required to run it.
 
-**Current limitations, stated plainly:** the connectors, persistence, exact-answer SQL paths,
-citation validation, retrieval grading, and evaluation gates are complete. The agent is a
-LangGraph `StateGraph` whose corrective loop is a real bounded cycle; routing within it is
-deterministic by design rather than model-driven, because the branches a model would choose between
-all converge on the same retrieval path. Retrieval and grading quality are
-measured against a labelled set (`backend/evals/baselines/`): retrieval reaches MRR 0.941 and
-recall@8 0.807, and the grader reaches 0.950 sufficiency accuracy, needing the corrective loop to
-recover questions phrased in vocabulary the corpus does not use. With Ollama on the GPU a RAG turn
-takes 3-5 s and an exact-answer turn a few milliseconds; grading is 3.4 s of that.
+## What is measured, not asserted
 
-Ingestion is deliberately **read-only**. Groundwork never writes back to GitHub or Jira and its
-agent takes no actions on your behalf — comparable products sync bi-directionally and let agents
-modify work items, so this is a chosen boundary rather than a missing feature. The system is
-designed to answer questions with traceable evidence, and to refuse when it has none.
+Every number here comes from a harness in `backend/evals/`, with the raw runs in
+`backend/evals/baselines/`.
 
-### Answer integrity
+**Inference, the same RAG turn on three machines:**
 
-- No evidence, no answer. A question that retrieves nothing returns zero citations, a grade of
-  `incorrect`, and an explicit unresolved gap — never a plausible-sounding guess.
-- Every `[n]` citation marker is checked against the citations actually emitted. An unresolved
-  marker is stripped, the grade downgraded, and the discrepancy disclosed.
-- Agent trace durations are measured, not estimated.
+| | RAG turn |
+|---|---:|
+| EC2 CPU, local chat model | 67.9 s |
+| Development laptop (M4, Metal) | 8.1 s |
+| **Deployed** (EC2 + hosted chat, embeddings local) | **1.6 s** |
+
+The deployment is faster than the machine it was built on. That follows only because the
+measurement identified *which* part was slow — generation, not embedding, and not the exact-answer
+path that makes no model call.
+
+**Generalization.** `evals/generalization_runner.py` derives every expectation from the database at
+run time, so it carries no knowledge of any corpus:
+
+    askbase     7/7      the project the system was built against
+    groundwork  8/8      a second project, answered with no change to the suite
+
+That distinction matters. Every other dataset here hardcodes its expectations, which guards known
+behaviour and cannot demonstrate that the system works on data nobody wrote cases for.
+
+**Retrieval and grading.** Recall@8 0.807, MRR 0.941 on a three-source corpus. The grader scores
+0.950 sufficiency accuracy and refuses 2 of 3 deliberately unanswerable questions; the third is a
+corpus-vocabulary case recorded rather than hidden.
+
+**Model choice went against intuition twice.** `qwen3:8b` and `qwen3:4b` were both measured and
+both rejected — the 4B model's recall fell from 1.000 to 0.717, discarding evidence the corpus
+genuinely holds. Grading is long-prompt classification returning one bit, which is the shape where
+the small model wins.
+
+## Answer integrity
+
+- **No evidence, no answer.** A question that retrieves nothing returns zero citations, a grade of
+  `incorrect`, and an explicit gap — never a plausible-sounding guess.
+- **Every `[n]` marker is validated** against the citations actually emitted. An unresolved marker is
+  stripped, the grade downgraded, and the discrepancy disclosed.
+- **Trace durations are measured**, not estimated.
+- **The limit, stated plainly:** a marker is checked for *resolution*, not *entailment*. The claim it
+  carries may misstate the passage it points at. A larger model lowers that error rate without
+  removing the class — see `evals/baselines/hosted_inference.md`.
+
+Ingestion is deliberately **read-only**. Groundwork never writes back to GitHub, Jira or Slack, and
+takes no actions on your behalf. Comparable products sync bidirectionally; this is a chosen boundary,
+not a missing feature.
+
+## Architecture
+
+```
+Next.js UI (Vercel)
+  ↓  server-side route handler attaches the API key
+FastAPI backend (EC2, behind Caddy + Let's Encrypt)
+  ↓
+deterministic intent router — ordered by specificity, no LLM
+  ├── GitHub / Jira / Slack connectors        incremental, overlap-cursor polling
+  ├── typed SQL for exact questions           structured_github.py, structured_jira.py
+  └── hybrid retrieval                        Postgres full-text + pgvector, fused by RRF
+  ↓
+CRAG-style grading → bounded corrective loop → citation validation
+  ↓
+a cited answer, or an explicit unresolved gap
+```
+
+The agent is a LangGraph `StateGraph`: 14 nodes, 17 edges, with one real cycle
+(`grade → correct → grade`). Routing inside it is deterministic by design — the branches a model
+would choose between all converge on the same retrieval path, so a planner would add seconds of
+latency and non-reproducibility for no behavioural difference.
+
+**Chat is pluggable; embeddings are not.** A `ChatClient` protocol has two implementations (Ollama
+and any OpenAI-compatible endpoint, verified against Groq). Embeddings stay local because the schema
+hardcodes `Vector(dim=768)` from `embeddinggemma` — a different embedding model is a different vector
+space, and retrieval would silently return unrelated chunks rather than fail.
 
 ## Local setup
 
-Copy environment variables:
-
 ```bash
 cp .env.example .env
-```
-
-Start infrastructure:
-
-```bash
 docker compose up -d postgres
 ```
 
-Run Ollama on the host, not in Docker:
+**Run Ollama on the host, not in Docker.** This is not a preference: Docker Desktop cannot reach the
+Apple Silicon GPU, so a containerised Ollama runs every token on emulated CPU — measured on an M4,
+7.2 tok/s in the container against 40 tok/s on the host, the difference between a ~40 s answer and a
+~4 s one.
 
 ```bash
 brew install ollama          # or https://ollama.com/download
 ollama serve
+ollama pull llama3.2:3b      # grading and synthesis
+ollama pull embeddinggemma   # embeddings
 ```
 
-**This is not a preference.** Docker Desktop cannot reach the Apple Silicon GPU, so a containerised
-Ollama runs every token on emulated CPU: measured on an M4, the same model does 7.2 tok/s in the
-container against 40 tok/s on the host, which is the difference between a ~40s answer and a ~4s
-one. The compose file still defines an `ollama` service for hosts where the container *can* use the
-GPU — Linux with the NVIDIA container toolkit — or for a self-contained demo where speed does not
-matter:
+`scripts/check_local.sh` reports which Ollama is answering and measures throughput, so a silent
+regression back to CPU is visible rather than merely slow. The compose file keeps an `ollama` service
+behind a profile for hosts where the container *can* reach a GPU:
 
 ```bash
-docker compose --profile bundled-ollama up -d      # then set OLLAMA_BASE_URL=http://ollama:11434
+docker compose --profile bundled-ollama up -d   # then OLLAMA_BASE_URL=http://ollama:11434
 ```
 
-Build the backend and apply migrations:
+Build and migrate:
 
 ```bash
 docker compose build backend
 docker compose run --rm --no-deps backend alembic upgrade head
+curl http://localhost:8000/health/ollama    # reports chat and embedding providers separately
 ```
 
-Pull local models:
+### Onboard a project
 
-```bash
-ollama pull llama3.2:3b        # grading and synthesis
-ollama pull embeddinggemma     # embeddings
-```
-
-`scripts/check_local.sh` reports which Ollama is answering and measures its throughput, so a silent
-regression back to CPU is visible rather than merely slow.
-
-Verify the configured Ollama model:
-
-```bash
-curl http://localhost:8000/health/ollama
-curl http://localhost:8000/health/database
-```
-
-Load the development workspace, then ask a persisted query:
-
-```bash
-curl -X POST http://localhost:8000/ingest/workspace \
-  -H 'X-API-Key: change-me'
-
-curl -X POST http://localhost:8000/query \
-  -H 'Content-Type: application/json' \
-  -H 'X-API-Key: change-me' \
-  -d '{"query":"What payment gateway blockers are delaying Project Atlas?"}'
-```
-
-Onboard and sync a real GitHub repository:
+`project_id` is required on every query. It used to default to a demo project, which meant a caller
+who forgot it got a confident answer about a project they had not asked about.
 
 ```bash
 curl -X POST http://localhost:8000/projects \
-  -H 'Content-Type: application/json' \
-  -H 'X-API-Key: change-me' \
+  -H 'Content-Type: application/json' -H 'X-API-Key: change-me' \
   -d '{"id":"project-x","name":"Project X","repo":"owner/repository"}'
 
 curl -X POST 'http://localhost:8000/projects/project-x/sync/github?max_commits=500' \
   -H 'X-API-Key: change-me'
 
 curl -X POST http://localhost:8000/query \
-  -H 'Content-Type: application/json' \
-  -H 'X-API-Key: change-me' \
-  -d '{"project_id":"project-x","query":"What was the last commit by Raghav on Project X?"}'
+  -H 'Content-Type: application/json' -H 'X-API-Key: change-me' \
+  -d '{"project_id":"project-x","query":"What was the last commit by <author>?"}'
 ```
 
-Connect and sync a Jira Cloud project after setting `JIRA_SITE_URL`, `JIRA_API_TOKEN`, and the
-other Jira variables from `.env.example`:
+Jira and Slack attach the same way, after setting their variables from `.env.example`:
 
 ```bash
 curl -X PUT http://localhost:8000/projects/project-x/connectors/jira \
-  -H 'Content-Type: application/json' \
-  -H 'X-API-Key: change-me' \
+  -H 'Content-Type: application/json' -H 'X-API-Key: change-me' \
   -d '{"project_key":"ASK"}'
 
-curl -X POST 'http://localhost:8000/projects/project-x/sync/jira?max_issues=500' \
-  -H 'X-API-Key: change-me'
-
-curl -X POST http://localhost:8000/query \
-  -H 'Content-Type: application/json' \
-  -H 'X-API-Key: change-me' \
-  -d '{"project_id":"project-x","query":"What is the status of ASK-6?"}'
+curl -X PUT http://localhost:8000/projects/project-x/connectors/slack \
+  -H 'Content-Type: application/json' -H 'X-API-Key: change-me' \
+  -d '{"channel_ids":["C0…"]}'
 ```
 
-Backend:
+Slack is indexed **thread-per-document**: a root message and its replies become one piece of
+evidence. It is the only source that records *why* a decision was made — GitHub and Jira record what
+changed and what is left.
+
+Add `?background=true` to any sync to have it run off the request thread and poll the matching `GET`
+endpoint instead. Synchronous is the default because the eval harness syncs then queries
+immediately.
+
+## Evaluation
+
+Three tiers, and only two of them gate.
 
 ```bash
 cd backend
-python3.12 -m venv .venv
-source .venv/bin/activate
-pip install -e ".[dev,eval]"
-uvicorn app.main:app --reload
+.venv/bin/python -m evals.runner --dataset evals/askbase.jsonl --sync-before --fail-under 1.0
+.venv/bin/python -m evals.runner --dataset evals/jira_askbase.jsonl --sync-before --fail-under 1.0
+.venv/bin/python -m evals.generalization_runner --project-id <any-project>
+.venv/bin/python -m evals.conversation_runner --trials 3 --sync-before --fail-under 1.0
+.venv/bin/python -m evals.conversation_runner --fast     # ~90s instead of ~50min
 ```
 
-Run the deterministic AskBase release gate against a running backend:
+The conversation suite reports two things separately, because only one is decided by code. **Hard
+checks** — which route ran, the grade, citation presence, whether every `[n]` resolves — gate at
+1.000. **Measured checks** — whether a follow-up resolved and to what — are run over `--trials`
+passes and reported as a rate, because asserting a 3B model's output once turns variance into a red
+build. Conversations marked `known_limitation` report in their own bucket and never gate; deleting
+the marker is how a fix is recorded.
 
-```bash
-cd backend
-.venv/bin/python -m evals.runner \
-  --dataset evals/askbase.jsonl \
-  --sync-before \
-  --fail-under 1.0
-```
-
-Measure retrieval and grading quality against the labelled set (run inside the container — a host
-PostgreSQL often owns `localhost:5432` and shadows the published port):
+Retrieval and grading are measured directly, without the HTTP layer:
 
 ```bash
 docker compose run --rm --no-deps backend python -m evals.retrieval_runner
 docker compose run --rm --no-deps backend python -m evals.grading_runner
 ```
 
-Grading needs a local grader model: `ollama pull llama3.2:3b`.
-
-Run the live Jira gate with the same runner:
-
-```bash
-.venv/bin/python -m evals.runner \
-  --dataset evals/jira_askbase.jsonl \
-  --sync-before \
-  --fail-under 1.0
-```
-
-Add `--semantic --judge-model qwen3:8b` only when the local Ollama judge model and the
-`eval` dependency extra are installed. Exact GitHub checks do not require an LLM.
-
-Run the golden conversation suite, which is the only tier that exercises multi-turn:
-
-```bash
-.venv/bin/python -m evals.conversation_runner --trials 3 --sync-before --fail-under 1.0
-```
-
-It reports two things separately, because only one of them is decided by code. **Hard checks** —
-which route ran, the grade, whether citations are present, whether every `[n]` marker resolves —
-gate at 1.000. **Measured checks** — whether a follow-up resolved and to what — are run over
-`--trials` passes and reported as a rate, because asserting a 3B model's output once turns
-variance into a red build. Conversations marked `known_limitation` are reported in their own
-bucket and never gate; deleting the marker is how a fix is recorded.
-
 ### Tests
 
-Two tiers. The default run needs nothing but the virtualenv, stays under a second, and never opens
-a socket:
+Two tiers. The default needs nothing but the virtualenv, stays under a second, and opens no socket —
+the LLM, the database and the rate limiter are all forced offline, because a tier whose result
+depends on what the developer happens to have running is not a tier.
 
 ```bash
 cd backend
-.venv/bin/python -m pytest
+.venv/bin/python -m pytest                       # 270 tests
 ```
 
-The integration tier runs the real SQL — the fusion query, the content-hash upsert, the connector
-sync state machine, the citation snapshot — against a database built by the shipped migrations. It
-is skipped unless `TEST_DATABASE_URL` is set, and embeddings are stubbed, so it needs no
-credentials and no Ollama:
+The integration tier runs the real SQL — the fusion query, content-hash upserts, the sync state
+machine, citation snapshots — against a database built by the shipped migrations. Skipped unless
+`TEST_DATABASE_URL` is set; embeddings are stubbed, so it needs no credentials and no Ollama:
 
 ```bash
 docker compose up -d postgres
-cd backend
 TEST_DATABASE_URL="postgresql+asyncpg://groundwork:groundwork@127.0.0.1:5433/groundwork_test" \
-  .venv/bin/python -m pytest -m integration
+  .venv/bin/python -m pytest -m integration      # 94 tests
 ```
 
-Port **5433** is deliberate. The container also publishes 5432, but a developer machine running its
-own PostgreSQL wins that port and silently shadows the container; 5433 always reaches the
-container. The tests create and truncate their own `groundwork_test` database and never touch the
-`groundwork` database holding an indexed corpus.
+Port **5433** is deliberate: the container also publishes 5432, but a developer machine running its
+own PostgreSQL wins that port and silently shadows the container.
 
-Frontend:
+## Deployment
 
-```bash
-cd frontend
-npm install
-npm run dev
+Frontend on Vercel, backend on EC2. See `docs/DEPLOYMENT.md`.
+
 ```
+browser → Vercel (free TLS)  →  Caddy + Let's Encrypt  →  backend
+                                                            ├── postgres      Docker network only
+                                                            ├── ollama        embeddings only
+                                                            └── Groq          chat
+docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+```
+
+Only Caddy is published. The chat model is deliberately **not installed** on the instance — a RAG
+turn measured 67.9 s there against 8.1 s on Metal, so generation goes to a hosted provider while
+embeddings stay local at 75–88 ms per query.
+
+**Operations:** JSON logs on stdout with a correlation id echoed as `X-Request-Id`, and Prometheus
+metrics at `/metrics`. Rate limiting has two ceilings — per client, and a global one, because the
+hosted free tier is metered per *organization* and enough individually-polite callers would drain it
+between them.
 
 ## API
 
-- `GET /health`
-- `GET /health/ollama`
-- `GET /health/database`
-- `POST /query`
-- `POST /ingest/workspace`
-- `POST /sync/github`
-- `POST /projects`
-- `POST /projects/{project_id}/sync/github`
-- `GET /projects/{project_id}/sync/github`
-- `PUT /projects/{project_id}/connectors/jira`
-- `POST /projects/{project_id}/sync/jira`
-- `GET /projects/{project_id}/sync/jira`
-- `GET /projects`
-- `GET /projects/{project_id}/timeline`
-- `GET /conversations/{conversation_id}`
-- `GET /conversations/{conversation_id}/trace`
+    GET  /health                                   public
+    GET  /health/ollama                            chat and embedding providers, reported separately
+    GET  /health/database
+    GET  /metrics                                  Prometheus exposition
+    POST /query                                    optional conversation_id
+    POST /projects                                 GET /projects
+    GET  /projects/{id}/timeline
+    PUT  /projects/{id}/connectors/{jira,slack}
+    POST /projects/{id}/sync/{github,jira,slack}   ?background=true
+    GET  /projects/{id}/sync/{github,jira,slack}
+    GET  /conversations/{id}                       GET /conversations/{id}/trace
 
-`POST /query` accepts an optional `conversation_id` to continue a conversation. A follow-up that
-depends on earlier turns — "who is it assigned to?" — is rewritten into a standalone question
-*before* routing, so it reaches the same deterministic SQL path the question it follows did; the
-standalone form comes back as `resolved_query`. A self-contained question skips resolution
-entirely, so exact-answer queries stay free of model latency. An unknown or cross-project
-`conversation_id` is a 404.
+All non-health endpoints require `X-API-Key`.
 
-GitHub sync follows API pagination, stores rate-limit status, and uses an overlap cursor after the
-first successful run. Synced commits are atomically upserted, chunked, embedded when Ollama is
-available, and immediately searchable.
+`POST /query` accepts an optional `conversation_id`. A follow-up that depends on earlier turns —
+*"who is it assigned to?"* — is rewritten into a standalone question **before** routing, so it reaches
+the same deterministic SQL path the question it follows did; the standalone form comes back as
+`resolved_query`. A self-contained question skips resolution entirely, so exact-answer queries stay
+free of model latency. An unknown or cross-project `conversation_id` is a 404.
 
-Jira sync uses Atlassian's Cloud ID routing and enhanced JQL pagination. Scoped tokens are sent as
-Bearer credentials, issues are incrementally refreshed with an overlap cursor, and exact issue,
-assignee, and blocker questions use deterministic SQL rather than semantic guessing.
+Connector syncs follow provider pagination, capture rate-limit headers, and use a 10-minute overlap
+cursor after the first successful run. Documents are atomically upserted by content hash, so
+unchanged content keeps its chunks and its embeddings.
 
-All non-health endpoints require:
+## Known limitations
 
-```http
-X-API-Key: change-me
-```
+Kept deliberately, with reasons, rather than quietly omitted:
+
+- **Polling, not webhooks.** No public ingress and no secret rotation to manage. The cost is real: a
+  freshly pushed commit with an unusually old author timestamp can fall outside the overlap window.
+- **Citations are checked for resolution, not entailment** — see Answer integrity above.
+- **One unanswerable question is accepted** by the grader, because the corpus grew Slack timing
+  metrics that superficially resemble the figure asked for.
+- **Author identity is untested against a repository with many distinct contributors.**
+- **Multi-intent questions are not supported**, and are declined rather than planned: citation
+  ordinals would have to be renumbered across two evidence sets, which is one of the two load-bearing
+  invariants.
