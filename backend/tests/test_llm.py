@@ -102,6 +102,9 @@ def test_embeddings_can_never_route_to_a_hosted_provider(
     """
     monkeypatch.setattr(settings, "llm_provider", "openai_compat")
     assert isinstance(embedding_client(), OllamaClient)
+    # And it must health-check the embedder, not the chat model. Found on a deployment that pulls
+    # only embeddinggemma: a working embedder reported itself unavailable as `llama3.2:3b`.
+    assert embedding_client().model == settings.embedding_model
     # And the chat protocol must not expose embedding at all, so a mistake is a type error.
     assert not hasattr(ChatClient, "embed")
 
@@ -189,3 +192,36 @@ async def test_openai_compat_does_not_wait_out_a_long_rate_limit() -> None:
 
     with pytest.raises(LLMProviderError, match="Rate limited"):
         await client.generate("system", "user")
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_ollama_health_accepts_an_untagged_model_name() -> None:
+    """Ollama reports `embeddinggemma:latest` for a model configured as `embeddinggemma`.
+
+    Found on the first deployment: the embedder was working and reported itself unavailable. It
+    stayed hidden because the chat model is configured as `llama3.2:3b`, which carries a tag and
+    matched, and nothing health-checked the embedder until it ran on its own box.
+    """
+    client = OllamaClient(base_url="http://ollama.test", model="embeddinggemma")
+    respx.get("http://ollama.test/api/tags").mock(
+        return_value=Response(200, json={"models": [{"name": "embeddinggemma:latest"}]})
+    )
+
+    health = await client.health()
+
+    assert health.available is True
+    assert health.error is None
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_ollama_health_still_reports_a_genuinely_missing_model() -> None:
+    client = OllamaClient(base_url="http://ollama.test", model="not-pulled")
+    respx.get("http://ollama.test/api/tags").mock(
+        return_value=Response(200, json={"models": [{"name": "embeddinggemma:latest"}]})
+    )
+
+    health = await client.health()
+
+    assert health.available is False

@@ -95,3 +95,35 @@ check, not a result.
 - `c7g.2xlarge` was never measured, so "15–30 s" above is extrapolation and labelled as such.
 - The RAG-turn figure is two model calls timed back to back, not the full graph. It excludes
   retrieval, database round trips, and HTTP overhead, all of which are small next to 68 seconds.
+
+
+## Follow-up: the deployed numbers — 2026-08-30
+
+The assumption this document left open — *"embeddings are expected to stay local... not yet
+measured"* — is now measured. **Query-time embedding on the same 2 vCPU instance: 75-88ms.** Sync
+time is slower at 1-2.4 chunks/s, but that is a background job nobody waits on.
+
+With chat moved to Groq and embeddings left local, the same instance that took **67.9s** per RAG
+turn now takes **1.6s** measured on the box, or **3.4s** through the full public chain including
+Vercel. The development laptop takes 8.1s.
+
+| | RAG turn |
+|---|---:|
+| EC2 CPU, local chat model | 67.9s |
+| Mac M4, Metal | 8.1s |
+| **EC2 + Groq, on the box** | **1.6s** |
+| EC2 + Groq, via Vercel | 3.4s |
+
+The deployment is faster than the machine it was built on, which is not a result anyone would have
+predicted from "the cloud box is 8x slower". It follows only because the measurement identified
+*which* part was slow: generation, not embedding, and not the exact-answer path that makes no model
+call at all.
+
+Two bugs surfaced on first deployment, both invisible until chat and embeddings ran on different
+providers, and both of which reported a working system as broken:
+
+- `embedding_client()` health-checked the **chat** model, because `OllamaClient` defaults `self.model`
+  to `settings.ollama_model`. Harmless while one box held both.
+- `embeddinggemma` never matched `embeddinggemma:latest`. Ollama treats a bare name as `:latest` and
+  reports the explicit tag. Latent forever: the chat model carries a tag, and nothing health-checked
+  the embedder until it ran alone.

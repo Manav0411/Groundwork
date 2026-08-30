@@ -1,0 +1,19 @@
+# TLS in front of the backend. Caddy obtains and renews a Let's Encrypt certificate for {$DOMAIN}
+# on its own, which is the whole reason it is here rather than a hand-rolled nginx config.
+#
+# The browser never reaches this host. Vercel serves the frontend and its route handler calls this
+# backend server-side, attaching the API key. That call crosses the public internet, which is what
+# makes TLS necessary rather than cosmetic.
+
+{$DOMAIN} {
+	encode gzip
+
+	# /health is left unauthenticated on purpose: the API key guards everything else, and an
+	# uptime check that needs a credential is one nobody runs.
+	reverse_proxy backend:8000
+
+	log {
+		output stdout
+		format console
+	}
+}
