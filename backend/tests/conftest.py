@@ -40,3 +40,17 @@ def offline_database(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         db_session, "SessionFactory", async_sessionmaker(offline_engine, expire_on_commit=False)
     )
+
+
+@pytest.fixture(autouse=True)
+def unlimited(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Turn rate limiting off for every test that does not explicitly want it.
+
+    Third instance of the same hazard as `offline_llm` and `offline_database`: a tier whose result
+    depends on ambient configuration is not a tier. The integration suite fires dozens of requests
+    from one address in a couple of seconds and throttled itself the moment the middleware landed.
+
+    `tests/test_ratelimit.py` re-enables it deliberately, which is the only place the limits are
+    under test.
+    """
+    monkeypatch.setattr(settings, "rate_limit_enabled", False)

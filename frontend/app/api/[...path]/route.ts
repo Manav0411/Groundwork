@@ -44,9 +44,20 @@ async function forward(request: Request, path: string[]): Promise<Response> {
 
   const body = request.method === "GET" || request.method === "HEAD" ? undefined : await request.text();
 
+  // Forward the caller's address. Without this every request reaches the backend from a Vercel
+  // egress host, so the whole internet looks like one client and per-client rate limiting would
+  // let a single person lock everybody out. Vercel populates these on the incoming request.
+  const clientIp =
+    request.headers.get("x-real-ip") ??
+    request.headers.get("x-forwarded-for")?.split(",")[0].trim();
+
   const response = await fetch(target, {
     method: request.method,
-    headers: { "Content-Type": "application/json", "X-API-Key": apiKey },
+    headers: {
+      "Content-Type": "application/json",
+      "X-API-Key": apiKey,
+      ...(clientIp ? { "X-Forwarded-For": clientIp } : {})
+    },
     body,
     cache: "no-store"
   });

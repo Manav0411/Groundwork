@@ -127,6 +127,23 @@ class Settings(BaseSettings):
     def web_fallback_enabled(self) -> bool:
         return bool(self.tavily_api_key)
 
+    # Rate limiting. Two ceilings, because the scarce resource is not this machine.
+    #
+    # Groq's free tier is counted per organization and its binding limit is 8,000 tokens per minute
+    # on the grading model. A grading call carries 8-16 chunks, so the budget sustains roughly two
+    # to three RAG questions a minute; the eval runner exhausted it after 8 of 20 back-to-back
+    # gradings. Twenty callers each under a per-client limit would drain it between them, which is
+    # what the global ceiling exists for.
+    #
+    # The numbers are set to be invisible to a person clicking through a demo and restrictive to a
+    # script. Exact-answer questions make no model call at all and are counted the same, which is
+    # deliberate: the alternative is classifying the query in middleware to decide how to count it,
+    # duplicating routing work to save a budget that is not actually under pressure from them.
+    rate_limit_enabled: bool = Field(default=True, alias="RATE_LIMIT_ENABLED")
+    rate_limit_per_client: int = Field(default=20, alias="RATE_LIMIT_PER_CLIENT")
+    rate_limit_global: int = Field(default=60, alias="RATE_LIMIT_GLOBAL")
+    rate_limit_window_seconds: float = Field(default=60.0, alias="RATE_LIMIT_WINDOW_SECONDS")
+
     backend_cors_origins: str = Field(default="http://localhost:3000", alias="BACKEND_CORS_ORIGINS")
 
     @cached_property
