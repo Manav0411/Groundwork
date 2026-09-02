@@ -103,36 +103,97 @@ export const RECORDED_RUN: QueryResponse = {
 };
 
 /**
- * A captured refusal. Kept separate because it is the state the product is
- * proudest of and the one a screenshot never shows.
+ * A captured refusal, from the live backend on 2 Sep 2026.
  *
- * Note: unlike RECORDED_RUN this one is *composed*, not captured — the backend
- * was asleep when the page was built. Recapture it against a live instance
- * before treating it as evidence of anything.
+ * This is the state the product is proudest of and the one a screenshot never
+ * shows. It is worth reading the trace rather than just the verdict: retrieval
+ * ran, the grader rejected it, the corrective loop rewrote the question, ran
+ * again, was rejected again, widened the pool to sixteen chunks, and was
+ * rejected a third time. The system did not decline because it was lazy.
+ *
+ * The question is also an honest one to show, because it exposes a real
+ * asymmetry: recency questions route to typed SQL for GitHub and Jira, and
+ * there is no `structured_slack` to route this one to. So it falls to semantic
+ * retrieval, where "the last conversation" has nothing to match on.
  */
-export const REFUSAL_QUESTION = "When did we last rotate the TLS certificate?";
+export const REFUSAL_QUESTION = "What was the last conversation on slack?";
 
 export const RECORDED_REFUSAL: QueryResponse = {
-  conversation_id: "recorded-refusal",
-  answer: "",
+  conversation_id: "recorded-refusal-2026-09-02",
+  answer:
+    "I could not find any indexed evidence for this question in groundwork. Sync the project's GitHub or Jira sources, or rephrase the question, and ask again.",
   retrieval_grade: "incorrect",
-  tools_used: ["hybrid_rag"],
+  tools_used: ["planner", "postgres_fts", "pgvector", "retrieval_grader", "corrective_retrieval"],
   citations: [],
   evidence: [],
   unresolved_gaps: [
-    "No commit message references certificate rotation",
-    "No ticket in scope mentions TLS or renewal",
-    "No thread on the subject after 12 Jun"
+    "No indexed evidence matched this question, so no part of an answer could be supported."
   ],
   trace: [
-    { name: "guardrail", status: "completed", duration_ms: 2, summary: "Question accepted" },
-    { name: "resolve", status: "completed", duration_ms: 1, summary: "Self-contained, no rewrite" },
-    { name: "plan", status: "completed", duration_ms: 1, summary: "Routed to hybrid retrieval" },
-    { name: "retrieve", status: "completed", duration_ms: 108, summary: "No passage above threshold" },
-    { name: "grade", status: "completed", duration_ms: 219, summary: "Evidence judged insufficient" },
-    { name: "correct", status: "completed", duration_ms: 94, summary: "Rewritten, still nothing" },
-    { name: "grade", status: "completed", duration_ms: 204, summary: "Evidence judged insufficient" },
-    { name: "validate", status: "completed", duration_ms: 12, summary: "Answer withheld" }
+    {
+      name: "Input Guardrail",
+      status: "completed",
+      duration_ms: 0,
+      summary: "Validated API access and project reference."
+    },
+    {
+      name: "Follow-up Resolution",
+      status: "completed",
+      duration_ms: 0,
+      summary: "First turn in the conversation; nothing to resolve against."
+    },
+    {
+      name: "Planner",
+      status: "completed",
+      duration_ms: 0,
+      summary: "Classified as weekly_project_brief; selected hybrid full-text/vector retrieval."
+    },
+    {
+      name: "Hybrid Retriever",
+      status: "completed",
+      duration_ms: 91,
+      summary: "Retrieved 8 persisted chunk(s) with hybrid full-text/vector search."
+    },
+    {
+      name: "Retrieval Grader",
+      status: "completed",
+      duration_ms: 459,
+      summary:
+        "Graded the 8 retrieved chunk(s) insufficient: no passage states the last conversation on slack."
+    },
+    {
+      name: "Corrective Retrieval 1",
+      status: "completed",
+      duration_ms: 331,
+      summary:
+        "Attempt 1: rewrote the question as 'Retrieve the most recent Slack conversation'. Re-retrieved 8 chunk(s)."
+    },
+    {
+      name: "Retrieval Grader",
+      status: "completed",
+      duration_ms: 439,
+      summary:
+        "Graded the 8 retrieved chunk(s) insufficient: no passage states the last conversation on slack."
+    },
+    {
+      name: "Corrective Retrieval 2",
+      status: "completed",
+      duration_ms: 83,
+      summary: "Attempt 2: widened the candidate pool. Re-retrieved 16 chunk(s)."
+    },
+    {
+      name: "Retrieval Grader",
+      status: "completed",
+      duration_ms: 548,
+      summary:
+        "Graded the 16 retrieved chunk(s) insufficient: no passage states the last conversation on slack."
+    },
+    {
+      name: "Citation Validator",
+      status: "completed",
+      duration_ms: 0,
+      summary: "No citation emitted and none claimed."
+    }
   ],
   resolved_query: null
 };
