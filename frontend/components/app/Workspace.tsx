@@ -21,6 +21,13 @@ import {
   type SlackSyncStatus
 } from "@/lib/api";
 import { useBackendStatus } from "@/lib/useBackendStatus";
+import {
+  deleteConversation,
+  loadConversation,
+  saveTurn,
+  useConversations,
+  type StoredConversation
+} from "@/lib/conversationStore";
 import { AnswerCard } from "@/components/evidence";
 import {
   RECORDED_AT,
@@ -32,6 +39,7 @@ import {
 import { AddProjectForm } from "./AddProjectForm";
 import { Composer } from "./Composer";
 import { ConnectorCard, formatDate, type ConnectorCounts } from "./ConnectorCard";
+import { HistoryRail } from "./HistoryRail";
 import { ProjectRail } from "./ProjectRail";
 import { Transcript, type TranscriptTurn } from "./Transcript";
 
@@ -70,6 +78,7 @@ export function Workspace() {
   const [query, setQuery] = useState("");
   const [turns, setTurns] = useState<TranscriptTurn[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [openConversationId, setOpenConversationId] = useState<string | null>(null);
   const [isQueryPending, startQueryTransition] = useTransition();
 
   const selectedProject = projects.find((project) => project.id === selectedId) ?? null;
@@ -79,6 +88,7 @@ export function Workspace() {
   // Derived rather than stored: "are we loading projects" is entirely a
   // function of the backend check and whether the fetch has returned.
   const loadingProjects = backend === "checking" || (backend === "awake" && !projectsLoaded);
+  const history = useConversations(selectedId || null);
 
   function setBusyFor(key: string, value: boolean) {
     setBusy((current) => ({ ...current, [key]: value }));
@@ -123,6 +133,21 @@ export function Workspace() {
     };
   }, [backend]);
 
+  function openConversation(conversation: StoredConversation) {
+    const stored = loadConversation(conversation.id) ?? conversation;
+    setTurns(stored.turns);
+    setOpenConversationId(stored.id);
+    setError(null);
+  }
+
+  function removeConversation(id: string) {
+    deleteConversation(id);
+    if (id === openConversationId) {
+      setTurns([]);
+      setOpenConversationId(null);
+    }
+  }
+
   function selectProject(project: Project) {
     setSelectedId(project.id);
     setJiraProjectKey(project.jira_project_key ?? "");
@@ -130,6 +155,7 @@ export function Workspace() {
     // A conversation is scoped to one project; the backend rejects one that
     // crosses projects, so carrying it over would only produce a 404.
     setTurns([]);
+    setOpenConversationId(null);
   }
 
   function handleProjectCreated(project: Project) {
@@ -245,10 +271,10 @@ export function Workspace() {
       const started = performance.now();
       try {
         const response = await askAgent(question, selectedProject.id, conversationId);
-        setTurns((previous) => [
-          ...previous,
-          { question, response, elapsedMs: Math.round(performance.now() - started) }
-        ]);
+        const turn = { question, response, elapsedMs: Math.round(performance.now() - started) };
+        setTurns((previous) => [...previous, turn]);
+        saveTurn(selectedProject.id, turn);
+        setOpenConversationId(response.conversation_id);
         setQuery("");
       } catch (err) {
         setError(err instanceof Error ? err.message : "The request failed.");
@@ -307,7 +333,14 @@ export function Workspace() {
           projects={projects}
           selectedId={selectedId}
           syncStatuses={githubStatuses}
-        />
+        >
+          <HistoryRail
+            activeId={openConversationId}
+            conversations={history}
+            onDelete={removeConversation}
+            onOpen={openConversation}
+          />
+        </ProjectRail>
 
         <div className="flex flex-col gap-5 p-4 sm:p-6">
           <div>
@@ -463,6 +496,7 @@ export function Workspace() {
           <Transcript
             onReset={() => {
               setTurns([]);
+              setOpenConversationId(null);
               setError(null);
             }}
             placeholder={

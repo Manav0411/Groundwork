@@ -203,3 +203,35 @@ export function syncSlack(projectId: string, maxMessages = 500): Promise<SlackSy
     { method: "POST" }
   );
 }
+
+/**
+ * One turn as the server remembers it.
+ *
+ * Deliberately smaller than `QueryResponse`: `load_conversation_history` returns
+ * the question, the answer text and the grade and nothing else, so that stored
+ * history can never become a source for a later answer. A thread restored from
+ * here therefore has no citations, evidence or trace to show, and the interface
+ * must say so rather than imply the evidence was checked and found absent.
+ */
+export type RemoteTurn = {
+  query: string;
+  resolved_query?: string | null;
+  answer: string;
+  retrieval_grade: QueryResponse["retrieval_grade"];
+  created_at?: string | null;
+};
+
+export type RemoteConversation = {
+  conversation_id: string;
+  project_id: string;
+  turns: RemoteTurn[];
+};
+
+export function getConversation(
+  conversationId: string,
+  projectId: string
+): Promise<RemoteConversation> {
+  return apiRequest<RemoteConversation>(
+    `/conversations/${encodeURIComponent(conversationId)}?project_id=${encodeURIComponent(projectId)}`
+  );
+}

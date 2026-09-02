@@ -10,6 +10,8 @@ type ProjectRailProps = {
   loading: boolean;
   onSelect: (project: Project) => void;
   onAdd: () => void;
+  /** Conversation history, rendered under the project list. */
+  children?: React.ReactNode;
 };
 
 /** Sync state is the only thing a dot can honestly say at this size. */
@@ -26,7 +28,8 @@ export function ProjectRail({
   syncStatuses,
   loading,
   onSelect,
-  onAdd
+  onAdd,
+  children
 }: ProjectRailProps) {
   return (
     <nav aria-label="Projects" className="border-b-2 border-ink p-4 xl:border-b-0 xl:border-r-2">
@@ -88,6 +91,8 @@ export function ProjectRail({
       >
         <Plus className="h-3.5 w-3.5" aria-hidden /> Connect repository
       </button>
+
+      {children}
     </nav>
   );
 }
