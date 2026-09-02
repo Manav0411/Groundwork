@@ -416,3 +416,88 @@ async def test_the_default_is_still_synchronous(session, project, client) -> Non
     signature = inspect.signature(routes.sync_project_github)
 
     assert signature.parameters["background"].default is False
+
+
+async def test_an_exact_slack_answer_is_graded_correct(session, project, client) -> None:
+    """The whole Slack path, end to end, with no model call anywhere in it.
+
+    Written against the same regression the commit test guards: this node also
+    has an out-of-range branch, and misplacing `grade = "correct"` into it would
+    leave every successful answer silently `ambiguous` with the content, the
+    citation and the trace all still correct.
+
+    The question is the one that exposed the gap in production. It reached
+    hybrid retrieval, where ranking is semantic and "the last conversation" has
+    no semantics to rank on, and was refused after two corrective attempts.
+    """
+    from datetime import UTC, datetime
+
+    from app.connectors.slack import SlackMessage, SlackThread
+    from app.db.models import ConnectorSyncState
+    from app.services.ingestion import slack_thread_documents
+
+    session.add(
+        ConnectorSyncState(
+            project_id="test-project",
+            source_type="slack",
+            status="succeeded",
+            last_succeeded_at=datetime.now(UTC),
+        )
+    )
+    await ingest_documents(
+        session,
+        slack_thread_documents(
+            "test-project",
+            [
+                SlackThread(
+                    channel_id="C0BRTQ9BZ7H",
+                    channel_name="groundwork-eng",
+                    thread_ts="1756000000.000100",
+                    messages=[
+                        SlackMessage(
+                            ts="1756000000.000100",
+                            user_id="U1",
+                            author="Manav Goel",
+                            text="Recall fell to 0.717 on the larger grader",
+                        )
+                    ],
+                    permalink="https://acme.slack.com/archives/C0BRTQ9BZ7H/p1756000000000100",
+                ),
+                # Older, so it must not win.
+                SlackThread(
+                    channel_id="C0BRTQ9BZ7H",
+                    channel_name="groundwork-eng",
+                    thread_ts="1755000000.000100",
+                    messages=[
+                        SlackMessage(
+                            ts="1755000000.000100",
+                            user_id="U2",
+                            author="Riya S",
+                            text="Kicking off the deployment work",
+                        )
+                    ],
+                    permalink="https://acme.slack.com/archives/C0BRTQ9BZ7H/p1755000000000100",
+                ),
+            ],
+        ),
+        None,
+    )
+
+    body = (
+        await client.post(
+            "/query",
+            headers=HEADERS,
+            json={
+                "query": "What was the last conversation on slack?",
+                "project_id": "test-project",
+            },
+        )
+    ).json()
+
+    assert body["retrieval_grade"] == "correct"
+    assert body["unresolved_gaps"] == []
+    assert len(body["citations"]) == 1
+    assert "Recall fell to 0.717" in body["answer"]
+    assert "structured_slack_query" in body["tools_used"]
+    # The exact-answer contract: no grading, no synthesis, no model.
+    assert not any("Grader" in step["name"] for step in body["trace"])

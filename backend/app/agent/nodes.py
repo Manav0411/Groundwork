@@ -43,6 +43,7 @@ from app.services.structured_jira import (
     jira_project_status,
     open_jira_blockers,
 )
+from app.services.structured_slack import extract_slack_channel, latest_slack_threads
 
 NO_EVIDENCE_ANSWER = (
     "I could not find any indexed evidence for this question in {project_id}. Sync the project's "
@@ -391,6 +392,86 @@ async def structured_jira(state: AgentState) -> AgentState:
         "unresolved_gaps": gaps,
         "answer": answer,
         "tools_used": ["planner", "structured_jira_query"],
+    }
+
+
+async def structured_slack(state: AgentState) -> AgentState:
+    """The newest indexed thread, optionally scoped to one channel.
+
+    Ordering is by the thread's most recent message, so a long-running thread
+    replied to today outranks one started yesterday and abandoned. Like the
+    other exact-answer tools this makes no model call at all.
+    """
+    request, session = state["request"], state["session"]
+    records, gaps = [], []
+    grade: RetrievalGrade = "ambiguous"
+    lookup = None
+    channel = extract_slack_channel(request.query)
+
+    with state["trace"].step("Structured Slack Query") as step:
+        if not state["project_exists"] or session is None:
+            answer = (
+                f"Project {request.project_id!r} is not onboarded. Create the project and run a "
+                "Slack sync before asking about threads."
+            )
+            step.summary = "Slack query could not run."
+            gaps.append("Project has not been onboarded or the database is unavailable.")
+        else:
+            lookup = await latest_slack_threads(
+                session, request.project_id, channel=channel
+            )
+            scope = f"#{channel}" if channel else "the indexed channels"
+            if lookup.status == "found":
+                thread = lookup.threads[0]
+                records = [thread.record]
+                when = (
+                    thread.latest_at.isoformat() if thread.latest_at else "an unrecorded time"
+                )
+                others = (
+                    f" with {', '.join(thread.participants[1:])}"
+                    if len(thread.participants) > 1
+                    else ""
+                )
+                answer = (
+                    f"The most recent indexed Slack thread in #{thread.channel_name} is "
+                    f"\u201c{thread.headline}\u201d, started by "
+                    f"{thread.author or 'an unknown author'}{others}. It has "
+                    f"{thread.message_count} message(s) and was last active at "
+                    f"{when} [1]."
+                )
+                grade = "correct"
+                step.summary = (
+                    f"Selected the newest of {lookup.available} indexed thread(s) in {scope}."
+                )
+            elif lookup.status == "out_of_range":
+                answer = (
+                    f"Only {lookup.available} thread(s) are indexed for {scope}; "
+                    "a later position was requested."
+                )
+                step.summary = "Requested position exceeds the indexed thread count."
+                gaps.append("Fewer indexed threads exist than the position requested.")
+            else:
+                answer = (
+                    f"No Slack thread is indexed for {scope} in {request.project_id}. "
+                    "Connect the channel and run a Slack sync."
+                )
+                step.summary = f"No indexed Slack thread was found for {scope}."
+                gaps.append("No Slack thread matching the request exists in the current index.")
+
+    if lookup is not None and lookup.stale:
+        grade = "ambiguous"
+        synced = lookup.last_synced_at.isoformat() if lookup.last_synced_at else "never"
+        gaps.append(f"Slack data may be stale; last successful sync: {synced}.")
+
+    evidence, citations = records_to_response(records)
+    return {
+        "records": records,
+        "evidence": evidence,
+        "citations": citations,
+        "retrieval_grade": grade,
+        "unresolved_gaps": gaps,
+        "answer": answer,
+        "tools_used": ["planner", "structured_slack_query"],
     }
 
 
