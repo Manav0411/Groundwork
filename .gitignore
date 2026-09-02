@@ -32,7 +32,8 @@ backend/evals/reports/
 /agentic rag.png
 
 # Local assistant tooling and configuration
-/CLAUDE.md
+CLAUDE.md
+AGENTS.md
 /.claude/
 
 # Node.js / Next.js
