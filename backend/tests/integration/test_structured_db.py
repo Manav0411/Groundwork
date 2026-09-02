@@ -12,11 +12,14 @@ import pytest
 
 from app.connectors.github import GitHubCommit
 from app.connectors.jira import JiraIssue, JiraUser
+from app.connectors.slack import SlackMessage, SlackThread
+from app.core.config import settings
 from app.db.models import ConnectorSyncState
 from app.services.ingestion import (
     github_commit_documents,
     ingest_documents,
     jira_issue_documents,
+    slack_thread_documents,
 )
 from app.services.structured_github import commit_by_sha, latest_commit_by_author
 from app.services.structured_jira import (
@@ -25,6 +28,7 @@ from app.services.structured_jira import (
     jira_project_status,
     open_jira_blockers,
 )
+from app.services.structured_slack import latest_slack_threads
 
 pytestmark = pytest.mark.integration
 
@@ -516,3 +520,143 @@ async def test_an_empty_project_is_not_a_complete_one(session, project) -> None:
 
     assert status.total == 0
     assert status.complete is False
+
+
+# --- Slack ------------------------------------------------------------------------------------
+
+
+def _thread(
+    channel: str,
+    thread_ts: str,
+    *,
+    headline: str,
+    author: str = "Manav Goel",
+    replies: list[tuple[str, str, str]] | None = None,
+) -> SlackThread:
+    """`replies` is (ts, author, text); the newest ts decides the thread's recency."""
+    messages = [SlackMessage(ts=thread_ts, user_id="U1", author=author, text=headline)]
+    for ts, reply_author, text in replies or []:
+        messages.append(SlackMessage(ts=ts, user_id="U2", author=reply_author, text=text))
+    return SlackThread(
+        channel_id=f"C{channel.upper()}",
+        channel_name=channel,
+        thread_ts=thread_ts,
+        messages=messages,
+        permalink=f"https://acme.slack.com/archives/C{channel.upper()}/p{thread_ts}",
+    )
+
+
+async def _ingest_threads(session, threads: list[SlackThread]) -> None:
+    await ingest_documents(session, slack_thread_documents("test-project", threads), None)
+
+
+async def test_latest_thread_is_the_most_recently_active_not_the_newest_started(
+    session, project
+) -> None:
+    """The ordering rule that makes this tool worth having.
+
+    A thread started earlier but replied to today is more recent than one
+    started later and abandoned. Ordering by start time would return the wrong
+    row, and no unit test can observe that.
+    """
+    await _ingest_threads(
+        session,
+        [
+            # Started first, still being replied to.
+            _thread(
+                "eng",
+                "1000000000.000100",
+                headline="Grader model choice",
+                replies=[("1000200000.000100", "Riya", "Recall dropped to 0.717")],
+            ),
+            # Started later, never touched again.
+            _thread("eng", "1000100000.000200", headline="Lunch plans"),
+        ],
+    )
+    await _mark_synced(session, "slack")
+
+    lookup = await latest_slack_threads(session, "test-project")
+
+    assert lookup.status == "found"
+    assert lookup.available == 2
+    assert lookup.threads[0].headline == "Grader model choice"
+    assert lookup.threads[0].message_count == 2
+
+
+async def test_channel_filter_scopes_the_lookup(session, project) -> None:
+    await _ingest_threads(
+        session,
+        [
+            _thread("eng", "1000300000.000100", headline="Newest overall, wrong channel"),
+            _thread("ops", "1000200000.000100", headline="Newest in ops"),
+        ],
+    )
+    await _mark_synced(session, "slack")
+
+    scoped = await latest_slack_threads(session, "test-project", channel="ops")
+
+    assert scoped.status == "found"
+    assert scoped.available == 1
+    assert scoped.threads[0].headline == "Newest in ops"
+    assert scoped.threads[0].channel_name == "ops"
+
+
+async def test_offset_walks_back_through_the_thread_list(session, project) -> None:
+    await _ingest_threads(
+        session,
+        [
+            _thread("eng", "1000300000.000100", headline="Third"),
+            _thread("eng", "1000200000.000100", headline="Second"),
+            _thread("eng", "1000100000.000100", headline="First"),
+        ],
+    )
+    await _mark_synced(session, "slack")
+
+    assert (await latest_slack_threads(session, "test-project", offset=1)).threads[
+        0
+    ].headline == "Second"
+    beyond = await latest_slack_threads(session, "test-project", offset=9)
+    assert beyond.status == "out_of_range"
+    # The count is what lets the answer say how many actually exist.
+    assert beyond.available == 3
+
+
+async def test_unknown_channel_is_not_found_rather_than_falling_back(session, project) -> None:
+    """The design rule: an exact tool refuses rather than guessing. Returning the
+    newest thread from some other channel would be a plausible wrong answer."""
+    await _ingest_threads(session, [_thread("eng", "1000100000.000100", headline="Only thread")])
+    await _mark_synced(session, "slack")
+
+    lookup = await latest_slack_threads(session, "test-project", channel="nonexistent")
+
+    assert lookup.status == "not_found"
+    assert lookup.threads == []
+    assert lookup.available == 0
+
+
+async def test_slack_lookup_is_scoped_to_the_project(session, project, other_project) -> None:
+    await ingest_documents(
+        session,
+        slack_thread_documents(
+            "other-project", [_thread("eng", "1000900000.000100", headline="Other project thread")]
+        ),
+        None,
+    )
+    await _ingest_threads(session, [_thread("eng", "1000100000.000100", headline="Ours")])
+    await _mark_synced(session, "slack")
+
+    lookup = await latest_slack_threads(session, "test-project")
+
+    assert lookup.available == 1
+    assert lookup.threads[0].headline == "Ours"
+
+
+async def test_slack_freshness_marks_a_stale_index(session, project) -> None:
+    """Staleness is why an otherwise correct answer grades down, so it has to be observable."""
+    await _ingest_threads(session, [_thread("eng", "1000100000.000100", headline="Thread")])
+    await _mark_synced(session, "slack", minutes_ago=settings.slack_sync_stale_after_minutes + 5)
+
+    lookup = await latest_slack_threads(session, "test-project")
+
+    assert lookup.status == "found"
+    assert lookup.stale is True

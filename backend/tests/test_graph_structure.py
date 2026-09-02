@@ -30,7 +30,7 @@ def _record() -> RetrievedRecord:
 def test_every_path_ends_at_citation_validation() -> None:
     """No route may reach the end without its citations being checked."""
     edges = _edges()
-    for terminal in ("structured_github", "structured_jira", "synthesize"):
+    for terminal in ("structured_github", "structured_jira", "structured_slack", "synthesize"):
         assert (terminal, "validate") in edges
     assert any(source == "validate" for source, _ in edges)
 
@@ -38,7 +38,7 @@ def test_every_path_ends_at_citation_validation() -> None:
 def test_exact_answer_paths_skip_grading_and_synthesis() -> None:
     """This is what keeps them deterministic and independent of any model."""
     edges = _edges()
-    for path in ("structured_github", "structured_jira"):
+    for path in ("structured_github", "structured_jira", "structured_slack"):
         assert (path, "grade") not in edges
         assert (path, "synthesize") not in edges
 
@@ -68,6 +68,7 @@ def test_corrective_cycle_exists() -> None:
         ("latest_commit", False, "structured_github"),
         ("jira_issue_status", False, "structured_jira"),
         ("jira_assignee", False, "structured_jira"),
+        ("latest_slack_thread", False, "structured_slack"),
         ("blocker_investigation", True, "structured_jira"),
         # Without Jira configured, a blocker question is just a retrieval question.
         ("blocker_investigation", False, "retrieve"),

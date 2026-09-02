@@ -15,6 +15,10 @@ from app.services.structured_github import (
     extract_commit_sha,
 )
 from app.services.structured_jira import extract_assignee, extract_issue_key
+from app.services.structured_slack import (
+    SLACK_SUBJECT_PATTERN,
+    extract_slack_channel,
+)
 
 QueryType = str
 
@@ -50,6 +54,14 @@ AGGREGATE_PATTERN = re.compile(
     r"complete|completed|done|finished|closed|resolved|open)\b",
     re.IGNORECASE,
 )
+
+
+# Recency over Slack threads. Slack had no structured route at all, so "what was the last
+# conversation on slack?" reached hybrid retrieval, where the ranking is semantic and the
+# question carries no semantics to rank on: the grader rejected every chunk across two
+# corrective attempts and the run refused. Ordering rows by their newest message answers it
+# exactly, the same way ordering commits does.
+SLACK_RECENCY_EXCLUSION = DECISION_PATTERN
 
 
 def classify_query(query: str) -> QueryType:
@@ -90,13 +102,24 @@ def classify_query(query: str) -> QueryType:
         ):
             return "latest_commit"
 
-    # 5. A question about the issue set rather than about one issue. Ordered after the exact
+    # 5. Recency over Slack threads. Both halves are required: "slack" alone is a topic, and
+    #    "latest" alone is not about Slack. Decision questions are excluded on the same reasoning
+    #    that keeps commit-content questions off the GitHub tool — "the last decision made on
+    #    slack" asks what was decided, and the newest thread is not reliably that answer.
+    if (
+        SLACK_SUBJECT_PATTERN.search(query)
+        and LATEST_PATTERN.search(query)
+        and not SLACK_RECENCY_EXCLUSION.search(query)
+    ):
+        return "latest_slack_thread"
+
+    # 6. A question about the issue set rather than about one issue. Ordered after the exact
     #    identifiers, which name a single record and are more specific, and before the topic
     #    categories, which would send it to retrieval and get it refused.
     if WORK_NOUN_PATTERN.search(query) and AGGREGATE_PATTERN.search(query):
         return "jira_project_status"
 
-    # 6. Topic categories below here all share the hybrid retrieval path; the distinction only
+    # 7. Topic categories below here all share the hybrid retrieval path; the distinction only
     #    labels the trace.
     if BLOCKER_PATTERN.search(query):
         return "blocker_investigation"
@@ -112,6 +135,7 @@ def is_structured(query_type: QueryType) -> bool:
         "jira_issue_status",
         "jira_assignee",
         "jira_project_status",
+        "latest_slack_thread",
     }
 
 
@@ -138,4 +162,8 @@ def describe_route(query_type: QueryType, query: str) -> str:
             f"Matched commit {extract_commit_sha(query)}; the question names one record, so "
             "selected deterministic GitHub SQL."
         )
+    if query_type == "latest_slack_thread":
+        channel = extract_slack_channel(query)
+        scope = f" in #{channel}" if channel else " across indexed channels"
+        return f"Matched Slack recency intent{scope}; selected deterministic Slack SQL."
     return f"Classified as {query_type}; selected hybrid full-text/vector retrieval."
