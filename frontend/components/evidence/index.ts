@@ -15,9 +15,11 @@ export {
   citationsById,
   gradeStyle,
   isRefusal,
+  refusalKind,
   sourceKey,
   sourceStyle,
   traceBars,
+  type RefusalKind,
   type SourceKey,
   type TraceBar
 } from "./provenance";

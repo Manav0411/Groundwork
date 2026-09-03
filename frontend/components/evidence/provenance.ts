@@ -61,12 +61,28 @@ export function gradeStyle(grade: QueryResponse["retrieval_grade"]) {
 }
 
 /**
- * An answer is a refusal when nothing was retrieved that supports it. The
- * backend expresses that as zero citations rather than a distinct status, so
- * the check lives here instead of being repeated at each call site.
+ * Two different runs end with zero citations, and calling both "nothing on
+ * record" was wrong — it described the first while the backend's own gap text
+ * described the second, on the same card.
+ *
+ * `no-evidence`  — retrieval found nothing. The run stopped before writing.
+ * `untraceable`  — retrieval found passages and an answer was written, but the
+ *                  citation validator dropped every marker it claimed, so
+ *                  nothing in it can be traced back. The answer is withheld.
+ *
+ * Evidence is what separates them: it is empty in the first and populated in
+ * the second, because the second got far enough to settle evidence before the
+ * validator rejected the prose written against it.
  */
+export type RefusalKind = "no-evidence" | "untraceable";
+
+export function refusalKind(answer: QueryResponse): RefusalKind | null {
+  if (answer.citations.length > 0) return null;
+  return answer.evidence.length > 0 ? "untraceable" : "no-evidence";
+}
+
 export function isRefusal(answer: QueryResponse): boolean {
-  return answer.citations.length === 0;
+  return refusalKind(answer) !== null;
 }
 
 /**

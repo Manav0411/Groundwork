@@ -45,8 +45,8 @@ export function Boundaries() {
       mark="§05"
     >
       <Refusal
+        answer={RECORDED_REFUSAL}
         className="mt-[clamp(26px,4vw,42px)]"
-        gaps={RECORDED_REFUSAL.unresolved_gaps}
         question={REFUSAL_QUESTION}
       />
 
