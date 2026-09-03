@@ -2,7 +2,15 @@
 
 import pytest
 
-from app.agent.graph import AGENT_GRAPH, _route_after_grade, _route_after_plan
+from app.agent.graph import (
+    AGENT_GRAPH,
+    _route_after_grade,
+    _route_after_guardrail,
+    _route_after_plan,
+)
+from app.agent.nodes import guardrail
+from app.agent.tracing import TraceRecorder
+from app.models.schemas import QueryRequest
 from app.core.config import settings
 from app.services.grading import GradeResult
 from app.services.retrieval import RetrievedRecord
@@ -127,3 +135,37 @@ def test_web_fallback_runs_once_correction_is_exhausted(monkeypatch: pytest.Monk
         "attempt": settings.corrective_max_attempts,
     }
     assert _route_after_grade(state) == "web_fallback"  # type: ignore[arg-type]
+
+
+def test_guardrail_can_end_the_run_without_touching_anything_expensive() -> None:
+    """A greeting must not reach retrieval, grading or synthesis."""
+    assert _route_after_guardrail({"query_type": "not_a_question"}) == "stop"  # type: ignore[arg-type]
+    assert _route_after_guardrail({"query_type": "weekly_project_brief"}) == "resolve"  # type: ignore[arg-type]
+
+
+@pytest.mark.asyncio
+async def test_guardrail_rejects_small_talk_before_the_pipeline() -> None:
+    """The node returns a complete, renderable state rather than raising."""
+    state = {
+        "request": QueryRequest(query="Hey", project_id="groundwork"),
+        "trace": TraceRecorder(),
+        "query_type": "weekly_project_brief",
+    }
+    update = await guardrail(state)  # type: ignore[arg-type]
+
+    assert update["query_type"] == "not_a_question"
+    assert update["tools_used"] == ["guardrail"]
+    assert update["citations"] == [] and update["evidence"] == []
+    # No gap: nothing was sought, so nothing is missing.
+    assert update["unresolved_gaps"] == []
+    assert "groundwork" in update["answer"]
+
+
+@pytest.mark.asyncio
+async def test_guardrail_admits_a_real_question_untouched() -> None:
+    state = {
+        "request": QueryRequest(query="What was the last commit by Manav0411?", project_id="p"),
+        "trace": TraceRecorder(),
+        "query_type": "weekly_project_brief",
+    }
+    assert await guardrail(state) == {}  # type: ignore[arg-type]

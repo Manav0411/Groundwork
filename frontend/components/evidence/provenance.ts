@@ -70,14 +70,21 @@ export function gradeStyle(grade: QueryResponse["retrieval_grade"]) {
  *                  citation validator dropped every marker it claimed, so
  *                  nothing in it can be traced back. The answer is withheld.
  *
- * Evidence is what separates them: it is empty in the first and populated in
- * the second, because the second got far enough to settle evidence before the
- * validator rejected the prose written against it.
+ * `not-a-question` — the guardrail stopped the run before retrieval, because
+ *                  the input was a greeting rather than a question. Nothing was
+ *                  sought, so nothing is missing, and answering a hello with a
+ *                  red verdict would be the wrong shape entirely.
+ *
+ * Evidence separates the first two: empty in `no-evidence` and populated in
+ * `untraceable`, because the second got far enough to settle evidence before the
+ * validator rejected the prose written against it. The third the backend names
+ * outright, since only it knows the run never started.
  */
-export type RefusalKind = "no-evidence" | "untraceable";
+export type RefusalKind = "no-evidence" | "untraceable" | "not-a-question";
 
 export function refusalKind(answer: QueryResponse): RefusalKind | null {
   if (answer.citations.length > 0) return null;
+  if (answer.query_type === "not_a_question") return "not-a-question";
   return answer.evidence.length > 0 ? "untraceable" : "no-evidence";
 }
 

@@ -7,6 +7,7 @@ share those nodes and differ only in how evidence is gathered.
 
 import re
 
+from app.agent.admission import is_small_talk
 from app.agent.followup import (
     carry_forward_author,
     needs_resolution,
@@ -64,6 +65,13 @@ COMMIT_CONTENT_GAP = (
     "Commit messages record what changed, not which feature it belonged to, so the feature this "
     "commit relates to is not answerable from the indexed history."
 )
+# Answering a greeting with "no evidence supports this" is technically true and useless. What the
+# person needs is the shape of a question this system can answer, using the sources it actually has.
+GREETING_ANSWER = (
+    "Ask me a question about {project_id} and I will answer it from indexed GitHub, Jira and Slack "
+    "evidence, with a citation for every claim. For example: \"what was the last commit by "
+    "<author>?\", \"what is the status of GW-3?\", or \"why did we choose the grader model?\"."
+)
 WEB_SOURCED_GAP = (
     "No indexed project evidence supported this question, so the answer comes from public web "
     "search rather than from this organization's own records."
@@ -71,9 +79,35 @@ WEB_SOURCED_GAP = (
 
 
 async def guardrail(state: AgentState) -> AgentState:
+    """Decide whether the input is a question at all, before anything expensive runs.
+
+    The node used to be a no-op that recorded a trace step claiming to have "validated API access
+    and project reference" — work that happens at the route layer, not here. So "Hey" ran the whole
+    graph and came back as a refusal.
+
+    A rejected input still returns a full state rather than raising, because the caller renders one
+    shape and a greeting is not an error.
+    """
+    query = state["request"].query
     with state["trace"].step("Input Guardrail") as step:
-        step.summary = "Validated API access and project reference."
-    return {}
+        if not is_small_talk(query):
+            step.summary = "Input reads as a question; admitted to the pipeline."
+            return {}
+
+        step.summary = "Input is a greeting, not a question. Stopped before any retrieval or model call."
+        return {
+            "query_type": "not_a_question",
+            "answer": GREETING_ANSWER.format(project_id=state["request"].project_id),
+            # Nothing was retrieved, so there is nothing to grade. The schema admits only three
+            # values and this is the honest one of them: no evidence supports an answer here.
+            "retrieval_grade": "incorrect",
+            "tools_used": ["guardrail"],
+            "citations": [],
+            "evidence": [],
+            # Deliberately empty. A gap describes evidence that was sought and missing; nothing was
+            # sought, and inventing one would read as a failure rather than a prompt.
+            "unresolved_gaps": [],
+        }
 
 
 async def resolve(state: AgentState) -> AgentState:
