@@ -94,7 +94,9 @@ async def guardrail(state: AgentState) -> AgentState:
             step.summary = "Input reads as a question; admitted to the pipeline."
             return {}
 
-        step.summary = "Input is a greeting, not a question. Stopped before any retrieval or model call."
+        step.summary = (
+            "Input is a greeting, not a question. Stopped before any retrieval or model call."
+        )
         return {
             "query_type": "not_a_question",
             "answer": GREETING_ANSWER.format(project_id=state["request"].project_id),

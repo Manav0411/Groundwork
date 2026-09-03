@@ -10,8 +10,8 @@ from app.agent.graph import (
 )
 from app.agent.nodes import guardrail
 from app.agent.tracing import TraceRecorder
-from app.models.schemas import QueryRequest
 from app.core.config import settings
+from app.models.schemas import QueryRequest
 from app.services.grading import GradeResult
 from app.services.retrieval import RetrievedRecord
 
