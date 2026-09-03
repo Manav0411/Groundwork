@@ -2,30 +2,46 @@ import { Section } from "./Section";
 
 /**
  * The colour system extends here, and this is where it earns its keep: a
- * GitHub dot on the commit question, Jira dots on the ticket questions, Slack
- * on the one that needs a model. You can read which source answers which kind
- * of question without reading the labels.
+ * GitHub dot on the commit question, Jira dots on the ticket questions. You can
+ * read which source answers which kind of question without reading the labels.
+ *
+ * Slack appears twice, which is the point of the section. Colour marks where
+ * evidence came from, not how it was fetched — the same source answers a
+ * recency question with typed SQL and an interpretive one with a model.
+ *
+ * Every figure below is the sum of that run's own trace durations, measured
+ * against the deployed backend on 3 Sep 2026 with the index freshly synced —
+ * the same number the trace strip adds up to, so a reader can check it. Median
+ * of three warm runs; the first call after the instance wakes is an order of
+ * magnitude slower and is not what these claim to represent.
  */
 const ROUTES = [
   {
     dot: "bg-gh",
     question: "What was the last commit by Manav0411?",
     how: "Typed SQL over normalised identities",
-    time: "31 ms",
+    time: "13 ms",
     calls: "0 model calls"
   },
   {
     dot: "bg-jira",
     question: "What is the status of GW-3?",
     how: "Typed SQL",
-    time: "24 ms",
+    time: "3 ms",
+    calls: "0 model calls"
+  },
+  {
+    dot: "bg-slack",
+    question: "What was the last conversation on Slack?",
+    how: "Typed SQL over thread recency",
+    time: "3 ms",
     calls: "0 model calls"
   },
   {
     dot: "bg-jira",
     question: "Are all the tasks complete?",
     how: "SQL counting by status category",
-    time: "28 ms",
+    time: "5 ms",
     calls: "0 model calls"
   },
   {
