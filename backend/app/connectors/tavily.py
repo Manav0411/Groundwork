@@ -1,8 +1,8 @@
 """Tavily web search — the last corrective step.
 
 Reached only when the project's own corpus has been graded insufficient, so it answers the case
-where a question is legitimate but its answer was never going to be in GitHub or Jira. Disabled
-unless `TAVILY_API_KEY` is set, which is the default.
+where a question is legitimate but its answer was never going to be in the project's own
+sources. Disabled unless `TAVILY_API_KEY` is set, which is the default.
 
 Evidence from here is deliberately marked `source_type="web"` and can never produce a `correct`
 grade: an answer assembled from the public internet is not the same claim as an answer traced to

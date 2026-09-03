@@ -46,9 +46,17 @@ from app.services.structured_jira import (
 )
 from app.services.structured_slack import extract_slack_channel, latest_slack_threads
 
+# Names no connector on purpose. This said "GitHub or Jira" from before Slack existed, and told
+# people to sync two of the three sources they had. Listing connectors means the line goes stale
+# every time one is added, and it is wrong per project regardless: Jira and Slack are both
+# optional, so a named source may not be configured at all.
+#
+# Worth knowing where this is actually read: the web UI renders its own refusal copy and shows
+# only `unresolved_gaps`, so this sentence reaches API callers rather than the app. That makes it
+# less visible, not less wrong -- the API is a supported surface and this was false on it.
 NO_EVIDENCE_ANSWER = (
     "I could not find any indexed evidence for this question in {project_id}. Sync the project's "
-    "GitHub or Jira sources, or rephrase the question, and ask again."
+    "connected sources, or rephrase the question, and ask again."
 )
 NO_EVIDENCE_GAP = (
     "No indexed evidence matched this question, so no part of an answer could be supported."
