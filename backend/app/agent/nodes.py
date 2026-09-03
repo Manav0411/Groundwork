@@ -224,10 +224,6 @@ async def structured_github(state: AgentState) -> AgentState:
                 )
                 step.summary = "No indexed commit matched the hash."
                 gaps.append("No commit with that hash exists in the currently indexed history.")
-        elif author is None:
-            answer = "I need an author name, for example: 'What was the last commit by Raghav?'"
-            step.summary = "Could not extract a commit author from the question."
-            gaps.append("Commit author was not specified using a recognizable form.")
         else:
             offset = extract_commit_offset(request.query)
             # A hash in a positional question anchors the count rather than naming the answer.
@@ -247,14 +243,32 @@ async def structured_github(state: AgentState) -> AgentState:
                     if lookup.record.source_timestamp
                     else "an unknown time"
                 )
+                # Without an author the sentence is about the project, not a person, so the
+                # attribution moves from the subject to a trailing clause rather than being
+                # dropped: who made the commit is still worth saying.
+                credited = lookup.author or author
                 answer = (
-                    f"The {describe_offset(lookup.offset)} indexed commit by "
-                    f"{lookup.author or author} is `{short_sha}` — “{lookup.record.title}”, "
-                    f"committed at {committed_at} [1]."
-                )
+                    (
+                        f"The {describe_offset(lookup.offset)} indexed commit by "
+                        f"{credited} is `{short_sha}`"
+                    )
+                    if author is not None
+                    else (
+                        f"The {describe_offset(lookup.offset)} indexed commit in "
+                        f"{request.project_id} is `{short_sha}`"
+                        + (f", by {credited}" if credited else "")
+                    )
+                ) + f" — “{lookup.record.title}”, committed at {committed_at} [1]."
                 step.summary = (
-                    f"Found the {describe_offset(lookup.offset)} commit by exact author identity "
-                    f"and timestamp for {author}."
+                    (
+                        f"Found the {describe_offset(lookup.offset)} commit by exact author "
+                        f"identity and timestamp for {author}."
+                    )
+                    if author is not None
+                    else (
+                        f"Found the {describe_offset(lookup.offset)} commit in the project by "
+                        "timestamp; no author was named."
+                    )
                 )
                 grade = "correct"
                 if lookup.stale:
@@ -263,13 +277,17 @@ async def structured_github(state: AgentState) -> AgentState:
                     gaps.append(f"GitHub data may be stale; last successful sync: {synced}.")
             elif lookup.status == "out_of_range":
                 position = lookup.offset + 1
+                subject = f"{lookup.author or author} has" if author is not None else "There are"
+                scope = "for this author" if author is not None else "for this project"
                 answer = (
-                    f"{lookup.author or author} has only {lookup.available} indexed commit(s) in "
+                    f"{subject} only {lookup.available} indexed commit(s) in "
                     f"{request.project_id}, so there is no {position}th most recent one."
                 )
-                step.summary = "Requested commit position is beyond this author's indexed history."
+                step.summary = (
+                    f"Requested commit position is beyond the indexed history {scope}."
+                )
                 gaps.append(
-                    f"Only {lookup.available} commit(s) are indexed for this author; "
+                    f"Only {lookup.available} commit(s) are indexed {scope}; "
                     f"position {position} was requested."
                 )
             elif lookup.status == "ambiguous":
@@ -281,10 +299,22 @@ async def structured_github(state: AgentState) -> AgentState:
                 gaps.append("A more specific author name, login, or email is required.")
             else:
                 answer = (
-                    f"No indexed GitHub commit was found for {author!r} in {request.project_id}. "
-                    "Run a GitHub sync or provide the author's login/email."
+                    (
+                        f"No indexed GitHub commit was found for {author!r} in "
+                        f"{request.project_id}. Run a GitHub sync or provide the author's "
+                        "login/email."
+                    )
+                    if author is not None
+                    else (
+                        f"No GitHub commits are indexed for {request.project_id}. "
+                        "Run a GitHub sync and ask again."
+                    )
                 )
-                step.summary = "No exact or unique partial author match was found."
+                step.summary = (
+                    "No exact or unique partial author match was found."
+                    if author is not None
+                    else "The project has no indexed commit history."
+                )
                 gaps.append("No matching commit exists in the currently indexed history.")
 
     if records and COMMIT_CONTENT_PATTERN.search(request.query):
