@@ -119,15 +119,17 @@ export const RECORDED_RUN: QueryResponse = {
  * any of the three connectors and never will be, so this refuses for want of
  * evidence rather than for want of a route. That is the policy §05 claims.
  *
- * The "sync ... GitHub or Jira" phrasing in the answer is the backend's, kept
- * verbatim. It predates the Slack connector and should name all three.
+ * Recaptured after the refusal text stopped naming connectors — it used to say
+ * "sync your GitHub or Jira sources", which predated Slack and told people to
+ * sync two of the three they had. The trace also now opens with the guardrail
+ * admitting the question, which the previous capture predated.
  */
 export const REFUSAL_QUESTION = "What did we decide about pricing?";
 
 export const RECORDED_REFUSAL: QueryResponse = {
-  conversation_id: "recorded-refusal-2026-09-03",
+  conversation_id: "recorded-refusal-2026-09-03b",
   answer:
-    "I could not find any indexed evidence for this question in groundwork. Sync the project's GitHub or Jira sources, or rephrase the question, and ask again.",
+    "I could not find any indexed evidence for this question in groundwork. Sync the project's connected sources, or rephrase the question, and ask again.",
   retrieval_grade: "incorrect",
   tools_used: ["planner", "postgres_fts", "pgvector", "retrieval_grader", "corrective_retrieval"],
   citations: [],
@@ -140,7 +142,7 @@ export const RECORDED_REFUSAL: QueryResponse = {
       name: "Input Guardrail",
       status: "completed",
       duration_ms: 0,
-      summary: "Validated API access and project reference."
+      summary: "Input reads as a question; admitted to the pipeline."
     },
     {
       name: "Follow-up Resolution",
@@ -157,27 +159,27 @@ export const RECORDED_REFUSAL: QueryResponse = {
     {
       name: "Hybrid Retriever",
       status: "completed",
-      duration_ms: 1375,
+      duration_ms: 1394,
       summary: "Retrieved 8 persisted chunk(s) with hybrid full-text/vector search."
     },
     {
       name: "Retrieval Grader",
       status: "completed",
-      duration_ms: 475,
+      duration_ms: 324,
       summary:
         "Graded the 8 retrieved chunk(s) insufficient: no passage states What did we decide about pricing?."
     },
     {
       name: "Corrective Retrieval 1",
       status: "completed",
-      duration_ms: 549,
+      duration_ms: 471,
       summary:
         "Attempt 1: rewrote the question as 'What decision was made regarding pricing?'. Re-retrieved 8 chunk(s)."
     },
     {
       name: "Retrieval Grader",
       status: "completed",
-      duration_ms: 329,
+      duration_ms: 595,
       summary:
         "Graded the 8 retrieved chunk(s) insufficient: no passage states What did we decide about pricing?."
     },
@@ -190,7 +192,7 @@ export const RECORDED_REFUSAL: QueryResponse = {
     {
       name: "Retrieval Grader",
       status: "completed",
-      duration_ms: 513,
+      duration_ms: 582,
       summary:
         "Graded the 16 retrieved chunk(s) insufficient: no passage states the decision about pricing."
     },
