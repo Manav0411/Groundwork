@@ -660,3 +660,57 @@ async def test_slack_freshness_marks_a_stale_index(session, project) -> None:
 
     assert lookup.status == "found"
     assert lookup.stale is True
+
+
+async def test_no_author_returns_the_newest_commit_in_the_project(session, project) -> None:
+    """"What was the last commit?" names nobody, and the answer is still well defined."""
+    await _ingest_commits(
+        session,
+        [
+            _commit("old", "Raghav Rao", login="raghav-dev", at="2026-08-01T09:00:00Z"),
+            _commit("newest", "Someone Else", login="someone", at="2026-08-20T09:00:00Z"),
+            _commit("middle", "Raghav Rao", login="raghav-dev", at="2026-08-10T09:00:00Z"),
+        ],
+    )
+
+    lookup = await latest_commit_by_author(session, "test-project")
+
+    assert lookup.status == "found"
+    # Crosses author boundaries: the newest commit overall belongs to a different person than the
+    # one with the most commits, which is exactly the case an author filter would get wrong.
+    assert lookup.sha == "newest"
+    assert lookup.author == "Someone Else"
+
+
+async def test_no_author_still_counts_offsets_across_the_whole_project(session, project) -> None:
+    await _ingest_commits(
+        session,
+        [
+            _commit("third", "A", login="a", at="2026-08-01T09:00:00Z"),
+            _commit("first", "B", login="b", at="2026-08-20T09:00:00Z"),
+            _commit("second", "C", login="c", at="2026-08-10T09:00:00Z"),
+        ],
+    )
+
+    assert (await latest_commit_by_author(session, "test-project", None, 1)).sha == "second"
+    assert (await latest_commit_by_author(session, "test-project", None, 2)).sha == "third"
+
+
+async def test_no_author_beyond_the_history_is_out_of_range_not_a_wrong_commit(
+    session, project
+) -> None:
+    await _ingest_commits(
+        session, [_commit("only", "A", login="a", at="2026-08-01T09:00:00Z")]
+    )
+
+    lookup = await latest_commit_by_author(session, "test-project", None, 4)
+
+    assert lookup.status == "out_of_range"
+    assert lookup.available == 1
+
+
+async def test_no_author_on_an_empty_project_is_not_found(session, project) -> None:
+    lookup = await latest_commit_by_author(session, "test-project")
+
+    assert lookup.status == "not_found"
+    assert lookup.record is None

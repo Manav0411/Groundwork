@@ -170,7 +170,7 @@ def _anchor_index(rows, anchor_sha: str | None) -> int | None:
 async def latest_commit_by_author(
     session: AsyncSession,
     project_id: str,
-    author_query: str,
+    author_query: str | None = None,
     offset: int = 0,
     anchor_sha: str | None = None,
 ) -> LatestCommitLookup:
@@ -178,8 +178,14 @@ async def latest_commit_by_author(
 
     The anchor is the author's newest commit unless the question named a specific hash — "what came
     before f4a941f?" counts from that commit, not from the top of the list.
+
+    `author_query` is optional, and None means the whole project's history rather than one
+    person's. "What was the last commit?" is the first thing a visitor asks, and it used to be
+    answered with "I need an author name" — a demand for input that the data did not require, since
+    the newest commit overall is exactly as well defined as the newest by a named author. Ordering
+    and offsets are identical either way; only the filter differs, so both paths share everything
+    below.
     """
-    normalized = normalize_author_identity(author_query)
     offset = max(0, min(offset, MAX_COMMIT_OFFSET))
     last_synced_at, stale = await _sync_freshness(session, project_id)
     base = (
@@ -193,11 +199,13 @@ async def latest_commit_by_author(
             SourceDocument.source_type == "github",
         )
     )
+    ordered = base.order_by(desc(SourceDocument.source_created_at), desc(SourceDocument.id))
+    normalized = normalize_author_identity(author_query) if author_query is not None else None
     exact_rows = (
         await session.execute(
-            base.where(SourceDocument.author_identities.contains([normalized]))
-            .order_by(desc(SourceDocument.source_created_at), desc(SourceDocument.id))
-            .limit(100)
+            ordered.limit(100)
+            if normalized is None
+            else ordered.where(SourceDocument.author_identities.contains([normalized])).limit(100)
         )
     ).all()
     start = _anchor_index(exact_rows, anchor_sha)
@@ -246,6 +254,22 @@ async def latest_commit_by_author(
             stale=stale,
             offset=target,
             available=len(exact_rows),
+        )
+
+    if normalized is None:
+        # Nothing to partially match against: the question named no author, so an empty result
+        # means the project has no indexed commits at all.
+        return LatestCommitLookup(
+            status="not_found",
+            author_query=None,
+            record=None,
+            sha=None,
+            author=None,
+            candidates=[],
+            last_synced_at=last_synced_at,
+            stale=stale,
+            offset=offset,
+            available=0,
         )
 
     recent_rows = (
