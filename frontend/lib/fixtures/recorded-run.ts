@@ -103,7 +103,8 @@ export const RECORDED_RUN: QueryResponse = {
 };
 
 /**
- * A captured refusal, from the live backend on 2 Sep 2026.
+ * A captured refusal, from the live backend on 3 Sep 2026, immediately after a
+ * successful sync of all three connectors.
  *
  * This is the state the product is proudest of and the one a screenshot never
  * shows. It is worth reading the trace rather than just the verdict: retrieval
@@ -111,15 +112,20 @@ export const RECORDED_RUN: QueryResponse = {
  * again, was rejected again, widened the pool to sixteen chunks, and was
  * rejected a third time. The system did not decline because it was lazy.
  *
- * The question is also an honest one to show, because it exposes a real
- * asymmetry: recency questions route to typed SQL for GitHub and Jira, and
- * there is no `structured_slack` to route this one to. So it falls to semantic
- * retrieval, where "the last conversation" has nothing to match on.
+ * The question matters as much as the trace. An earlier capture used "What was
+ * the last conversation on slack?", which refused only because no route existed
+ * for it — `structured_slack` now answers that in 3 ms, which made the old
+ * fixture a demonstration of a gap that had been closed. Pricing was never in
+ * any of the three connectors and never will be, so this refuses for want of
+ * evidence rather than for want of a route. That is the policy §05 claims.
+ *
+ * The "sync ... GitHub or Jira" phrasing in the answer is the backend's, kept
+ * verbatim. It predates the Slack connector and should name all three.
  */
-export const REFUSAL_QUESTION = "What was the last conversation on slack?";
+export const REFUSAL_QUESTION = "What did we decide about pricing?";
 
 export const RECORDED_REFUSAL: QueryResponse = {
-  conversation_id: "recorded-refusal-2026-09-02",
+  conversation_id: "recorded-refusal-2026-09-03",
   answer:
     "I could not find any indexed evidence for this question in groundwork. Sync the project's GitHub or Jira sources, or rephrase the question, and ask again.",
   retrieval_grade: "incorrect",
@@ -151,42 +157,42 @@ export const RECORDED_REFUSAL: QueryResponse = {
     {
       name: "Hybrid Retriever",
       status: "completed",
-      duration_ms: 91,
+      duration_ms: 1375,
       summary: "Retrieved 8 persisted chunk(s) with hybrid full-text/vector search."
     },
     {
       name: "Retrieval Grader",
       status: "completed",
-      duration_ms: 459,
+      duration_ms: 475,
       summary:
-        "Graded the 8 retrieved chunk(s) insufficient: no passage states the last conversation on slack."
+        "Graded the 8 retrieved chunk(s) insufficient: no passage states What did we decide about pricing?."
     },
     {
       name: "Corrective Retrieval 1",
       status: "completed",
-      duration_ms: 331,
+      duration_ms: 549,
       summary:
-        "Attempt 1: rewrote the question as 'Retrieve the most recent Slack conversation'. Re-retrieved 8 chunk(s)."
+        "Attempt 1: rewrote the question as 'What decision was made regarding pricing?'. Re-retrieved 8 chunk(s)."
     },
     {
       name: "Retrieval Grader",
       status: "completed",
-      duration_ms: 439,
+      duration_ms: 329,
       summary:
-        "Graded the 8 retrieved chunk(s) insufficient: no passage states the last conversation on slack."
+        "Graded the 8 retrieved chunk(s) insufficient: no passage states What did we decide about pricing?."
     },
     {
       name: "Corrective Retrieval 2",
       status: "completed",
-      duration_ms: 83,
+      duration_ms: 82,
       summary: "Attempt 2: widened the candidate pool. Re-retrieved 16 chunk(s)."
     },
     {
       name: "Retrieval Grader",
       status: "completed",
-      duration_ms: 548,
+      duration_ms: 513,
       summary:
-        "Graded the 16 retrieved chunk(s) insufficient: no passage states the last conversation on slack."
+        "Graded the 16 retrieved chunk(s) insufficient: no passage states the decision about pricing."
     },
     {
       name: "Citation Validator",
