@@ -31,7 +31,7 @@ export function AnswerCard({
   className
 }: AnswerCardProps) {
   if (isRefusal(answer)) {
-    return <Refusal question={question} gaps={answer.unresolved_gaps} className={className} />;
+    return <Refusal question={question} answer={answer} className={className} />;
   }
 
   const grade = gradeStyle(answer.retrieval_grade);
