@@ -46,6 +46,12 @@ def _route_after_plan(state: AgentState) -> str:
     return "retrieve"
 
 
+def _route_after_guardrail(state: AgentState) -> str:
+    # The guardrail is the only node that can end the run before it starts. Everything downstream
+    # of here costs either a database round trip or a model call.
+    return "stop" if state["query_type"] == "not_a_question" else "resolve"
+
+
 def _route_after_grade(state: AgentState) -> str:
     result = state.get("grade_result")
     if result is None or result.is_sufficient:
@@ -81,8 +87,13 @@ def build_graph():
 
     builder.add_edge(START, "guardrail")
     # Resolution sits ahead of the planner because routing reads identifiers out of the question
-    # text, and a follow-up has none until it is resolved.
-    builder.add_edge("guardrail", "resolve")
+    # text, and a follow-up has none until it is resolved. The guardrail can skip all of it: an
+    # input that is not a question has nothing to resolve, route, retrieve or synthesise.
+    builder.add_conditional_edges(
+        "guardrail",
+        _route_after_guardrail,
+        {"resolve": "resolve", "stop": END},
+    )
     builder.add_edge("resolve", "plan")
     builder.add_conditional_edges(
         "plan",

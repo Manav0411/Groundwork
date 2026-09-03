@@ -33,6 +33,9 @@ export type QueryResponse = {
   trace: TraceStep[];
   /** The standalone question a follow-up was answered as; null when it was already self-contained. */
   resolved_query?: string | null;
+  /** Which answer path handled the question. `not_a_question` means the guardrail stopped the run
+   *  before retrieval, so there is no evidence to show and none was sought. */
+  query_type?: string | null;
 };
 
 export type Project = {

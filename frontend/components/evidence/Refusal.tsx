@@ -15,6 +15,10 @@ const COPY = {
   untraceable: {
     heading: "Answer withheld",
     body: "Retrieval found supporting passages and an answer was written against them, but it cited none. An answer whose claims cannot be traced to a source is not shown, however plausible it reads."
+  },
+  "not-a-question": {
+    heading: "Nothing asked yet",
+    body: null
   }
 } as const;
 
@@ -35,12 +39,18 @@ export function Refusal({ question, answer, className }: RefusalProps) {
   const copy = COPY[kind];
   const grade = gradeStyle(answer.retrieval_grade);
   const gaps = answer.unresolved_gaps;
+  // A greeting is not a verdict on anything. It keeps the card's structure so the
+  // surface stays one component, but drops the red shadow, the red heading and
+  // the grade chip — none of which are true of a run that never started.
+  const prompt = kind === "not-a-question";
 
   return (
-    <section className={`border-2 border-ink bg-card shadow-mountBad ${className ?? ""}`}>
+    <section
+      className={`border-2 border-ink bg-card ${prompt ? "shadow-mount" : "shadow-mountBad"} ${className ?? ""}`}
+    >
       <div className="border-b border-ruleSoft px-4 pb-3.5 pt-4">
         <p className="mb-2 font-mono text-[9.5px] font-semibold uppercase tracking-[0.16em] text-ink3">
-          Question
+          {prompt ? "You said" : "Question"}
         </p>
         <p className="m-0 max-w-[44ch] font-serif text-[clamp(18px,2vw,23px)] leading-tight text-ink">
           {question}
@@ -48,11 +58,18 @@ export function Refusal({ question, answer, className }: RefusalProps) {
       </div>
 
       <div className="px-4 pb-5 pt-4">
-        <h3 className="m-0 mb-2.5 font-mono text-xs font-semibold uppercase tracking-[0.2em] text-bad">
+        <h3
+          className={`m-0 mb-2.5 font-mono text-xs font-semibold uppercase tracking-[0.2em] ${
+            prompt ? "text-ink3" : "text-bad"
+          }`}
+        >
           {copy.heading}
         </h3>
+        {/* On a prompt the backend's own sentence is the whole content — it names
+            the sources and gives worked examples, which no fixed copy here could
+            do without repeating it. */}
         <p className="m-0 mb-4 max-w-[56ch] font-serif text-base leading-relaxed text-ink2">
-          {copy.body}
+          {copy.body ?? answer.answer}
         </p>
 
         {gaps.length > 0 ? (
@@ -71,18 +88,27 @@ export function Refusal({ question, answer, className }: RefusalProps) {
       </div>
 
       <div className="flex flex-wrap items-center gap-x-3.5 gap-y-2 border-t border-ruleSoft px-3.5 py-2.5 font-mono text-[10.5px] font-semibold uppercase tracking-[0.12em] text-ink3">
-        <span className={`border px-2 py-0.5 ${grade.border} ${grade.text}`}>
-          grade · {grade.label}
-        </span>
-        <span className="border border-rule px-2 py-0.5 text-ink2">citations · 0</span>
-        {/* Only meaningful when something was retrieved. On a no-evidence run
-            there was nothing to retain, so the count would read as a bug. */}
-        {kind === "untraceable" ? (
-          <span className="break-identifier border border-rule px-2 py-0.5 text-ink2">
-            evidence retrieved · {answer.evidence.length}
-          </span>
-        ) : null}
-        <span className="ml-auto">answer withheld</span>
+        {prompt ? (
+          <>
+            <span className="border border-rule px-2 py-0.5 text-ink2">no query run</span>
+            <span className="ml-auto">0 model calls</span>
+          </>
+        ) : (
+          <>
+            <span className={`border px-2 py-0.5 ${grade.border} ${grade.text}`}>
+              grade · {grade.label}
+            </span>
+            <span className="border border-rule px-2 py-0.5 text-ink2">citations · 0</span>
+            {/* Only meaningful when something was retrieved. On a no-evidence run
+                there was nothing to retain, so the count would read as a bug. */}
+            {kind === "untraceable" ? (
+              <span className="break-identifier border border-rule px-2 py-0.5 text-ink2">
+                evidence retrieved · {answer.evidence.length}
+              </span>
+            ) : null}
+            <span className="ml-auto">answer withheld</span>
+          </>
+        )}
       </div>
     </section>
   );
