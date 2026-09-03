@@ -35,7 +35,12 @@ export function AnswerCard({
   }
 
   const grade = gradeStyle(answer.retrieval_grade);
-  const route = answer.tools_used[0] ?? "hybrid_rag";
+  // `tools_used[0]` is "planner" on every structured route, so the chip read
+  // "route · planner" for exactly the answers whose route is the interesting
+  // part. `query_type` is the backend's own name for the path taken, and the
+  // schema exposes it because `tools_used` cannot tell `latest_commit` from
+  // `commit_detail` — both reach the same tool.
+  const route = answer.query_type ?? answer.tools_used[0] ?? "hybrid_rag";
 
   return (
     <article className={`border-2 border-ink bg-card shadow-mount ${className ?? ""}`}>

@@ -82,9 +82,23 @@ export function gradeStyle(grade: QueryResponse["retrieval_grade"]) {
  */
 export type RefusalKind = "no-evidence" | "untraceable" | "not-a-question";
 
+/** Did this run reach retrieval at all? The structured routes never do — they
+ *  answer from one typed SQL row and skip the retriever entirely. */
+function tookStructuredRoute(answer: QueryResponse): boolean {
+  return answer.tools_used.some((tool) => tool.startsWith("structured_"));
+}
+
 export function refusalKind(answer: QueryResponse): RefusalKind | null {
   if (answer.citations.length > 0) return null;
   if (answer.query_type === "not_a_question") return "not-a-question";
+  // A structured lookup that returns no row is not a refusal, and every line of
+  // refusal copy would be false about it: nothing was retrieved because nothing
+  // was ever meant to be. "Hey, what was the last commit?" reaches the GitHub
+  // tool, which needs an author it cannot find, and answers by asking for one —
+  // a useful sentence the refusal card was discarding in favour of claiming
+  // retrieval had come back empty. Returning null renders it as the ordinary
+  // answer it is, with its gap as a caveat and its short trace visible.
+  if (tookStructuredRoute(answer)) return null;
   return answer.evidence.length > 0 ? "untraceable" : "no-evidence";
 }
 
