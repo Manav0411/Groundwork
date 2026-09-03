@@ -10,7 +10,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.core.config import settings
-from app.core.ratelimit import SlidingWindow
+from app.core.ratelimit import RateLimitMiddleware, SlidingWindow
 from app.main import create_app
 
 
@@ -112,3 +112,85 @@ def test_disabling_it_lets_everything_through(monkeypatch: pytest.MonkeyPatch) -
     codes = [client.get("/health/database").status_code for _ in range(5)]
 
     assert 429 not in codes
+
+
+def _daily_window(client: TestClient) -> SlidingWindow:
+    """Reach the live daily window inside the running middleware stack.
+
+    Starlette wraps each middleware, so the instance the app actually calls is not reachable from
+    `user_middleware`; walking `app` from the outside in finds the real one.
+    """
+    app = client.app.middleware_stack
+    while app is not None:
+        if isinstance(app, RateLimitMiddleware):
+            return app._daily
+        app = getattr(app, "app", None)
+    raise AssertionError("RateLimitMiddleware is not in the stack")
+
+
+@pytest.fixture
+def daily_capped(monkeypatch: pytest.MonkeyPatch):
+    """Generous per-minute limits, tight daily one, so only the daily cap can fire."""
+    monkeypatch.setattr(settings, "rate_limit_enabled", True)
+    monkeypatch.setattr(settings, "rate_limit_per_client", 1000)
+    monkeypatch.setattr(settings, "rate_limit_global", 1000)
+    monkeypatch.setattr(settings, "rate_limit_window_seconds", 60.0)
+    monkeypatch.setattr(settings, "rate_limit_daily", 2)
+    monkeypatch.setattr(settings, "rate_limit_daily_window_seconds", 86_400.0)
+    return TestClient(create_app())
+
+
+def test_browsing_never_spends_the_daily_budget(daily_capped) -> None:
+    """The reason MODEL_PATHS exists.
+
+    The frontend polls health and lists projects on every page load. If those counted, a few
+    hundred page views would exhaust a day's questions without one being asked.
+    """
+    codes = [daily_capped.get("/health/database").status_code for _ in range(20)]
+
+    assert 429 not in codes
+
+
+def test_the_daily_budget_limits_questions(daily_capped) -> None:
+    def ask() -> int:
+        return daily_capped.post(
+            "/query", json={"project_id": "groundwork", "query": "hello?"}
+        ).status_code
+
+    first, second, third = ask(), ask(), ask()
+
+    assert 429 not in (first, second)
+    assert third == 429
+
+
+def test_the_daily_refusal_is_expressed_in_hours(daily_capped) -> None:
+    """"Retry in 41900s" is a number nobody can act on."""
+    for _ in range(3):
+        response = daily_capped.post(
+            "/query", json={"project_id": "groundwork", "query": "hello?"}
+        )
+
+    assert response.status_code == 429
+    detail = response.json()["detail"]
+    assert "daily question budget" in detail
+    assert "h." in detail and "41900s" not in detail
+
+
+def test_a_minute_throttled_request_does_not_spend_a_day(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Order matters: the daily budget is checked last and only if the request survives."""
+    monkeypatch.setattr(settings, "rate_limit_enabled", True)
+    monkeypatch.setattr(settings, "rate_limit_per_client", 1)
+    monkeypatch.setattr(settings, "rate_limit_global", 1000)
+    monkeypatch.setattr(settings, "rate_limit_window_seconds", 60.0)
+    monkeypatch.setattr(settings, "rate_limit_daily", 5)
+    client = TestClient(create_app())
+
+    body = {"project_id": "groundwork", "query": "hello?"}
+    client.post("/query", json=body)
+    for _ in range(4):
+        assert client.post("/query", json=body).status_code == 429
+
+    # One request got through; the other four were refused per-minute. If those had counted, the
+    # daily budget of five would now be gone instead of down by one.
+    daily = _daily_window(client)
+    assert len(daily._hits["*"]) == 1

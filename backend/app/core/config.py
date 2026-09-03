@@ -145,6 +145,14 @@ class Settings(BaseSettings):
     rate_limit_per_client: int = Field(default=20, alias="RATE_LIMIT_PER_CLIENT")
     rate_limit_global: int = Field(default=60, alias="RATE_LIMIT_GLOBAL")
     rate_limit_window_seconds: float = Field(default=60.0, alias="RATE_LIMIT_WINDOW_SECONDS")
+    # Groq's free tier allows 1,000 requests per day per model. One RAG question costs several
+    # calls, so 400 questions is the conservative read of that ceiling rather than a round number,
+    # and it leaves headroom for the eval suites, which run against the same organization.
+    # Only /query is counted; see MODEL_PATHS in ratelimit.py for why that matters.
+    rate_limit_daily: int = Field(default=400, alias="RATE_LIMIT_DAILY")
+    rate_limit_daily_window_seconds: float = Field(
+        default=86_400.0, alias="RATE_LIMIT_DAILY_WINDOW_SECONDS"
+    )
 
     backend_cors_origins: str = Field(default="http://localhost:3000", alias="BACKEND_CORS_ORIGINS")
 

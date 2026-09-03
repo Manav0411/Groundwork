@@ -29,6 +29,13 @@ from app.core.observability import RATE_LIMITED
 # worse than no alert. It touches no model and no database.
 EXEMPT_PATHS = frozenset({"/health"})
 
+# Only these spend the hosted provider's daily allowance. The distinction is load-bearing rather
+# than tidy: the per-minute limits can safely cover every path, but a daily budget must not be. The
+# frontend polls health and lists projects on every page load, and counting those against a few
+# hundred questions a day would let ordinary browsing exhaust the quota without a single question
+# being asked.
+MODEL_PATHS = frozenset({"/query"})
+
 
 def client_key(request: Request) -> str:
     """Identify the caller, preferring the forwarded client over the immediate peer.
@@ -91,6 +98,14 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         window = settings.rate_limit_window_seconds
         self._per_client = SlidingWindow(settings.rate_limit_per_client, window)
         self._global = SlidingWindow(settings.rate_limit_global, window)
+        # The per-minute limits protect tokens-per-minute. Nothing protected requests-per-day,
+        # which is the other half of the free tier and the half that cannot recover on its own:
+        # a minute-limited caller can still spend a whole day's allowance in twenty minutes.
+        # Rolling rather than resetting at midnight, because a fixed reset invites the same
+        # boundary abuse a fixed window does, one day wide instead of one minute.
+        self._daily = SlidingWindow(
+            settings.rate_limit_daily, settings.rate_limit_daily_window_seconds
+        )
         self._last_sweep = 0.0
 
     async def dispatch(self, request: Request, call_next):
@@ -111,17 +126,31 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         if allowed:
             allowed, remaining, retry_after = self._global.check("*", now)
             scope = "global"
+        # Checked last, and only for the paths that spend it, so a request already refused by a
+        # per-minute limit does not also consume a day's budget.
+        if allowed and request.url.path in MODEL_PATHS:
+            allowed, _, retry_after = self._daily.check("*", now)
+            scope = "daily"
 
         if not allowed:
             RATE_LIMITED.labels(scope=scope).inc()
+            # Hours, not seconds, once the daily budget is the thing that ran out: "retry in
+            # 41,900s" is a number nobody can act on.
+            detail = (
+                (
+                    f"This demo's daily question budget ({settings.rate_limit_daily}) is spent. "
+                    f"It frees up gradually over the next {retry_after / 3600:.0f}h. The recorded "
+                    "run on the landing page still works."
+                )
+                if scope == "daily"
+                else (
+                    f"Rate limit exceeded ({scope}). This demo runs on a free tier; "
+                    f"retry in {retry_after:.0f}s."
+                )
+            )
             return JSONResponse(
                 status_code=429,
-                content={
-                    "detail": (
-                        f"Rate limit exceeded ({scope}). This demo runs on a free tier; "
-                        f"retry in {retry_after:.0f}s."
-                    )
-                },
+                content={"detail": detail},
                 headers={"Retry-After": str(max(1, int(retry_after + 0.999)))},
             )
 
