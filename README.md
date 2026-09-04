@@ -214,17 +214,19 @@ depends on what the developer happens to have running is not a tier.
 
 ```bash
 cd backend
-.venv/bin/python -m pytest                       # 270 tests
+.venv/bin/python -m pytest                       # 356 tests
 ```
 
 The integration tier runs the real SQL — the fusion query, content-hash upserts, the sync state
-machine, citation snapshots — against a database built by the shipped migrations. Skipped unless
+machine, citation snapshots — against a database built by the shipped migrations. It also runs the
+exact-answer evaluation dataset against a seeded corpus, through the same checker the live runner
+uses: those cases route to typed SQL and make no model call, so they gate in CI. Skipped unless
 `TEST_DATABASE_URL` is set; embeddings are stubbed, so it needs no credentials and no Ollama:
 
 ```bash
 docker compose up -d postgres
 TEST_DATABASE_URL="postgresql+asyncpg://groundwork:groundwork@127.0.0.1:5433/groundwork_test" \
-  .venv/bin/python -m pytest -m integration      # 94 tests
+  .venv/bin/python -m pytest -m integration      # 131 tests
 ```
 
 Port **5433** is deliberate: the container also publishes 5432, but a developer machine running its

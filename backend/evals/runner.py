@@ -42,11 +42,21 @@ async def run_evaluation(
     semantic: bool = False,
     judge_model: str = "qwen3:8b",
     ollama_base_url: str = "http://localhost:11434",
+    transport: httpx.AsyncBaseTransport | None = None,
 ) -> EvaluationSummary:
+    """Run every case and score it.
+
+    `transport` exists so the same cases can be driven against an in-process ASGI app instead of a
+    running server. That is what lets CI gate the exact-answer dataset: those cases route to typed
+    SQL and make no model call, so with a seeded database they need neither credentials nor Ollama.
+    Left as None, this is unchanged -- a plain HTTP client against `base_url`.
+    """
     started = datetime.now(UTC)
     results: list[CaseResult] = []
     timeout = httpx.Timeout(60)
-    async with httpx.AsyncClient(base_url=base_url, timeout=timeout) as client:
+    async with httpx.AsyncClient(
+        base_url=base_url, timeout=timeout, transport=transport
+    ) as client:
         health_response = await client.get("/health")
         health_response.raise_for_status()
         if sync_before:
