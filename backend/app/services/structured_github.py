@@ -2,7 +2,7 @@ import re
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import desc, select
+from sqlalchemy import desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
@@ -153,6 +153,23 @@ def _record_from_row(row) -> RetrievedRecord:
     )
 
 
+# Tokens are joined with a unit separator, never a space, so a pattern can never match across two
+# identities: ["raghav", "rao"] must not answer a search for "raghav ra".
+_IDENTITY_SEPARATOR = "\x1f"
+
+
+def _identity_contains(normalized: str):
+    """SQL predicate: some identity token contains `normalized` as a substring.
+
+    The Python equivalent (`any(normalized in identity for identity in ...)`) can only see rows
+    already loaded, which is what tied ambiguity detection to a recency window. Expressed in SQL it
+    applies to the whole project.
+    """
+    escaped = normalized.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+    joined = func.array_to_string(SourceDocument.author_identities, _IDENTITY_SEPARATOR)
+    return joined.like(f"%{escaped}%", escape="\\")
+
+
 def _anchor_index(rows, anchor_sha: str | None) -> int | None:
     """Where to start counting: the named commit's position, or the newest.
 
@@ -274,33 +291,51 @@ async def latest_commit_by_author(
             available=0,
         )
 
-    recent_rows = (
+    # Whether the question is ambiguous is decided over every contributor, not a recent slice.
+    # This used to fetch the 100 newest commits and filter them in Python, which made the check
+    # blind to anyone whose latest commit fell outside that window: on a 500-commit repository
+    # with 51 contributors, only 9 of them appeared in it. A query matching two people then
+    # resolved confidently to whichever one happened to be recent -- the confidently-wrong answer
+    # this whole path exists to avoid. Measured on `pallets/flask`: "davi" matches David Lord
+    # (396 commits, newest) and David (1 commit, 198th), and answered as David Lord.
+    #
+    # The projection is deliberate. Deciding needs names and identities, not documents, so this
+    # stays cheap enough to run unbounded while the row fetch below stays capped.
+    matching = (
         await session.execute(
-            base.order_by(desc(SourceDocument.source_created_at), desc(SourceDocument.id)).limit(
-                100
+            select(SourceDocument.author, SourceDocument.author_identities)
+            .where(
+                SourceDocument.project_id == project_id,
+                SourceDocument.source_type == "github",
+                _identity_contains(normalized),
             )
+            .distinct()
         )
     ).all()
-    partial_rows = [
-        item
-        for item in recent_rows
-        if any(normalized in identity for identity in item.SourceDocument.author_identities)
-    ]
     # Cluster by shared identity token rather than by display name. Keying on the display name
     # meant one human reported two ways -- `Manav0411` on some commits and `Manav Goel` on others,
     # same login and same email -- came back as an ambiguity and was refused, even though the
     # identity arrays overlapped plainly. The exact-match path above unified them, so this only
     # ever surfaced on a partial query.
-    clusters = group_by_shared_identity(
-        [list(item.SourceDocument.author_identities) for item in partial_rows]
-    )
-    candidates = sorted(
-        {
-            partial_rows[cluster[0]].SourceDocument.author or "Unknown author"
-            for cluster in clusters
-        },
+    identity_clusters = group_by_shared_identity([list(row[1]) for row in matching])
+    distinct_people = sorted(
+        {matching[cluster[0]][0] or "Unknown author" for cluster in identity_clusters},
         key=str.casefold,
     )
+
+    partial_rows = (
+        (
+            await session.execute(
+                base.where(_identity_contains(normalized))
+                .order_by(desc(SourceDocument.source_created_at), desc(SourceDocument.id))
+                .limit(100)
+            )
+        ).all()
+        if len(identity_clusters) == 1
+        else []
+    )
+    clusters = identity_clusters
+    candidates = distinct_people
     if len(clusters) == 1 and partial_rows:
         partial_start = _anchor_index(partial_rows, anchor_sha)
         if partial_start is None:

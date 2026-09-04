@@ -845,3 +845,38 @@ async def test_jira_one_person_under_two_display_names_resolves(session, project
 
     assert lookup.status == "found", f"one human reported as {lookup.status}: {lookup.candidates}"
     assert [issue.key for issue in lookup.issues] == ["TEST-2", "TEST-1"]
+
+
+async def test_ambiguity_sees_contributors_outside_the_recent_window(session, project) -> None:
+    """Found on `pallets/flask`, and only findable on a real multi-contributor corpus.
+
+    Ambiguity used to be decided over the 100 newest commits, filtered in Python. On that repo
+    only 9 of 51 contributors fell inside that window, so a query matching two people resolved
+    confidently to whichever one was recent: "davi" matched David Lord (396 commits, newest) and
+    David (1 commit, 198th) and answered as David Lord with no disclosure.
+
+    The window here is deliberately larger than 100 so the older contributor is outside it.
+    """
+    commits = [
+        _commit("old-davi", "Davina Cole", login="davina", at="2024-01-01T09:00:00Z"),
+        *[
+            _commit(f"recent-{index}", "David Lord", login="davidism", at="2026-08-01T09:00:00Z")
+            for index in range(120)
+        ],
+    ]
+    await _ingest_commits(session, commits)
+
+    lookup = await latest_commit_by_author(session, "test-project", "davi")
+
+    assert lookup.status == "ambiguous", f"answered as {lookup.author!r}, hiding the other match"
+    assert lookup.candidates == ["David Lord", "Davina Cole"]
+
+
+async def test_a_token_search_cannot_span_two_identities(session, project) -> None:
+    """Identities are matched individually, never as one concatenated string."""
+    await _ingest_commits(
+        session, [_commit("a", "Raghav Rao", login="rao-r", at="2026-08-01T09:00:00Z")]
+    )
+
+    # "rao" ends one identity and "rao-r" begins another; a joined-string search would match.
+    assert (await latest_commit_by_author(session, "test-project", "rao rao-r")).status != "found"
