@@ -225,3 +225,42 @@ def test_verdicts_carry_the_claim_and_its_markers_for_disclosure() -> None:
             index=1, supported=False, quote="NONE", text="the unsupported claim", ordinals=[2, 5]
         )
     ]
+
+
+# --- the node's handling of an outage ------------------------------------------------------------
+
+
+async def test_an_unchecked_answer_is_downgraded_and_says_so(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Measured in production: the provider's per-minute ceiling skipped the check on 3 of 20
+    answers, and one still graded `correct` -- indistinguishable from a verified answer except in
+    the trace. "Could not verify" is not "verified"."""
+    from app.agent import nodes
+    from app.agent.tracing import TraceRecorder
+    from app.models.schemas import Citation, EvidenceItem, QueryRequest
+    from app.services.entailment import EntailmentResult
+
+    async def _unchecked(*_args: object, **_kwargs: object) -> EntailmentResult:
+        return EntailmentResult(
+            verdicts=[], summary="Entailment not checked: rate limited.", used_model=False
+        )
+
+    monkeypatch.setattr(nodes, "check_entailment", _unchecked)
+    state = {
+        "request": QueryRequest(query="q", project_id="p"),
+        "trace": TraceRecorder(),
+        "answer": "A claim resting on evidence [1].",
+        "citations": [Citation(id=1, source_type="github", title="t", url=None, timestamp=None)],
+        "evidence": [
+            EvidenceItem(
+                id="e1", source_type="github", title="t", snippet="s", citation_id=1, authority=0.9
+            )
+        ],
+        "unresolved_gaps": [],
+    }
+
+    update = await nodes.entail(state)  # type: ignore[arg-type]
+
+    assert update["retrieval_grade"] == "ambiguous"
+    assert any("not checked" in gap for gap in update["unresolved_gaps"])

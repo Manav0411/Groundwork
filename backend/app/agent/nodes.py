@@ -757,6 +757,22 @@ async def entail(state: AgentState) -> AgentState:
         result = await check_entailment(spans, premises)
         step.summary = result.summary
 
+    if not result.used_model:
+        # Measured in production: Groq's per-minute ceiling skipped the check on 3 of 20 answers,
+        # and one of those still graded `correct` -- presented exactly like a verified answer, with
+        # only the trace saying otherwise. "Could not verify" is not "verified". The grader already
+        # settled this for its own outage: `_derived_grade` downgrades and says relevance was not
+        # checked, so this does the same.
+        return {
+            "entailment_result": result,
+            "retrieval_grade": "ambiguous",
+            "unresolved_gaps": [
+                *state.get("unresolved_gaps", []),
+                "Claims in this answer were not checked against their cited evidence, so support "
+                "for them is unverified rather than confirmed.",
+            ],
+        }
+
     if not result.unsupported:
         return {"entailment_result": result}
 
