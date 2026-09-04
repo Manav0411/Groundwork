@@ -71,9 +71,13 @@ the small model wins.
 - **Every `[n]` marker is validated** against the citations actually emitted. An unresolved marker is
   stripped, the grade downgraded, and the discrepancy disclosed.
 - **Trace durations are measured**, not estimated.
-- **The limit, stated plainly:** a marker is checked for *resolution*, not *entailment*. The claim it
-  carries may misstate the passage it points at. A larger model lowers that error rate without
-  removing the class — see `evals/baselines/hosted_inference.md`.
+- **Every cited claim is checked against the passage it cites.** A claim the evidence does not state
+  downgrades the grade and is quoted back as a gap. Measured: recall 0.909 on unsupported claims,
+  1.000 on leaving correct ones alone — see `evals/baselines/entailment_2026-09-04.md`. It caught a
+  real misattribution on its first live answer.
+- **The limit, stated plainly:** a claim is the span its marker terminates, which for a
+  paragraph-trailing marker is the whole paragraph, and quantifier scope ("all" widened from "exact")
+  is the class it still misses.
 
 Ingestion is deliberately **read-only**. Groundwork never writes back to GitHub, Jira or Slack, and
 takes no actions on your behalf. Comparable products sync bidirectionally; this is a chosen boundary,
@@ -285,7 +289,7 @@ Kept deliberately, with reasons, rather than quietly omitted:
 
 - **Polling, not webhooks.** No public ingress and no secret rotation to manage. The cost is real: a
   freshly pushed commit with an unusually old author timestamp can fall outside the overlap window.
-- **Citations are checked for resolution, not entailment** — see Answer integrity above.
+- **Entailment is judged per claim span, not per sentence** — see Answer integrity above.
 - **One unanswerable question is accepted** by the grader, because the corpus grew Slack timing
   metrics that superficially resemble the figure asked for.
 - **Author identity is untested against a repository with many distinct contributors.**
