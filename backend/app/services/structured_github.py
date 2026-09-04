@@ -69,7 +69,11 @@ PREVIOUS_PATTERN = re.compile(
     r"\b(?:previous|prior|one\s+before|before\s+that|preceding|before\s+(?=[0-9a-f]{7,40}\b))",
     re.IGNORECASE,
 )
+# The lookup reads at most this many commits per author, so positions beyond it cannot be served.
+# It is a window on the answer, not a claim about how many commits the person has: David Lord has
+# 396 in `pallets/flask` and this reads 100 of them.
 MAX_COMMIT_OFFSET = 99
+COMMIT_WINDOW = MAX_COMMIT_OFFSET + 1
 
 
 def extract_commit_author(query: str) -> str | None:
@@ -104,8 +108,11 @@ def extract_commit_offset(query: str) -> int:
     if match:
         numeric, word = match.group(1), match.group(2)
         # An out-of-range position is answered by refusing, not by clamping into a real commit.
+        # It used to clamp here, so "the 105th commit" quietly became the 100th and came back as a
+        # confident answer -- the exact failure this comment already claimed to prevent. The true
+        # position is returned and the lookup decides whether it can be served.
         if numeric is not None:
-            return min(max(int(numeric) - 1, 0), MAX_COMMIT_OFFSET)
+            return max(int(numeric) - 1, 0)
         return ORDINAL_WORDS[word.casefold()]
     if PREVIOUS_PATTERN.search(query):
         return 1
@@ -205,7 +212,9 @@ async def latest_commit_by_author(
     and offsets are identical either way; only the filter differs, so both paths share everything
     below.
     """
-    offset = max(0, min(offset, MAX_COMMIT_OFFSET))
+    # Not clamped: a position past the end has to reach the range check below, or it is answered
+    # with the last commit that does exist.
+    offset = max(0, offset)
     last_synced_at, stale = await _sync_freshness(session, project_id)
     base = (
         select(SourceDocument, DocumentChunk)

@@ -21,7 +21,10 @@ from app.services.ingestion import (
     jira_issue_documents,
     slack_thread_documents,
 )
-from app.services.structured_github import commit_by_sha, latest_commit_by_author
+from app.services.structured_github import (
+    commit_by_sha,
+    latest_commit_by_author,
+)
 from app.services.structured_jira import (
     jira_issue_by_key,
     jira_issues_by_assignee,
@@ -880,3 +883,31 @@ async def test_a_token_search_cannot_span_two_identities(session, project) -> No
 
     # "rao" ends one identity and "rao-r" begins another; a joined-string search would match.
     assert (await latest_commit_by_author(session, "test-project", "rao rao-r")).status != "found"
+
+
+async def test_a_position_past_the_lookup_window_is_refused_not_clamped(session, project) -> None:
+    """Found on `pallets/flask`: "the 105th commit by davidism" returned the 100th.
+
+    The offset was clamped to the window before the range check ran, so every position past the
+    end resolved to the last commit that did exist. The extractor's own comment already said an
+    out-of-range position is answered by refusing rather than by clamping; the code did not.
+    """
+    await _ingest_commits(
+        session,
+        [
+            _commit(
+                f"c{index:03d}",
+                "David Lord",
+                login="davidism",
+                at=f"2026-08-01T09:{index:02d}:00Z",
+            )
+            for index in range(60)
+        ],
+    )
+
+    lookup = await latest_commit_by_author(session, "test-project", "David Lord", 104)
+
+    assert lookup.status == "out_of_range"
+    assert lookup.record is None and lookup.sha is None
+    assert lookup.offset == 104
+

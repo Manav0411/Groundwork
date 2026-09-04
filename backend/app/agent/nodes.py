@@ -29,6 +29,7 @@ from app.services.llm import (
 )
 from app.services.retrieval import hybrid_retrieve, records_to_response
 from app.services.structured_github import (
+    COMMIT_WINDOW,
     commit_by_sha,
     describe_offset,
     extract_commit_author,
@@ -287,9 +288,21 @@ async def structured_github(state: AgentState) -> AgentState:
                 position = lookup.offset + 1
                 subject = f"{lookup.author or author} has" if author is not None else "There are"
                 scope = "for this author" if author is not None else "for this project"
+                # Two different shortfalls, and conflating them asserts something false. Fewer
+                # commits than asked for is a fact about the person; hitting the lookup window is a
+                # fact about this tool. Saying "has only 100 commits" of someone with 396 is the
+                # kind of confident wrongness the deterministic path exists to avoid.
                 answer = (
-                    f"{subject} only {lookup.available} indexed commit(s) in "
-                    f"{request.project_id}, so there is no {position}th most recent one."
+                    (
+                        f"This lookup reads the {COMMIT_WINDOW} most recent commits "
+                        f"{scope} in {request.project_id}, so it cannot reach the "
+                        f"{position}th."
+                    )
+                    if lookup.available >= COMMIT_WINDOW
+                    else (
+                        f"{subject} only {lookup.available} indexed commit(s) in "
+                        f"{request.project_id}, so there is no {position}th most recent one."
+                    )
                 )
                 step.summary = (
                     f"Requested commit position is beyond the indexed history {scope}."

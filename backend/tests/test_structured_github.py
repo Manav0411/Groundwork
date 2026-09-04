@@ -1,6 +1,10 @@
 import pytest
 
-from app.services.structured_github import extract_commit_author, normalize_author_identity
+from app.services.structured_github import (
+    extract_commit_author,
+    extract_commit_offset,
+    normalize_author_identity,
+)
 from app.services.structured_jira import extract_assignee, extract_issue_key
 
 
@@ -35,3 +39,13 @@ def test_extract_jira_issue_key(query: str, expected: str | None) -> None:
 
 def test_extract_jira_assignee() -> None:
     assert extract_assignee("Which issues are assigned to Manav Goel?") == "Manav Goel"
+
+
+def test_an_ordinal_past_the_lookup_window_survives_extraction() -> None:
+    """The clamp used to happen here, before the lookup could refuse.
+
+    "The 105th commit" came back as offset 99 and was answered with the 100th commit. Extraction
+    reports the position that was asked for; whether it can be served is the lookup's call.
+    """
+    assert extract_commit_offset("What was the 105th commit by davidism?") == 104
+    assert extract_commit_offset("What was the 3rd commit by davidism?") == 2
