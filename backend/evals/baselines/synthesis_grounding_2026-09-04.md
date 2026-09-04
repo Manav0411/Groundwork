@@ -10,10 +10,21 @@ the citation format: a requirement that is true but buried in prose does not bin
 
 ## Result: directionally right, and smaller than the headline
 
-| | before | after |
-|---|---:|---:|
-| Answers with a flagged claim | 6 of 17 (35%) | 4 of 16 (**25%**) |
-| Graded `correct` | 6 of 20 | **9 of 20** |
+| | before | after (2 trials) | after (5 trials) |
+|---|---:|---:|---:|
+| Answers with claims to judge | 14 | 15 | 18 |
+| **Flagged** | 6 (**43%**) | 4 (**27%**) | 5 (**28%**) |
+| Graded `correct` | 6 of 20 | 9 of 20 | 12 of 50 |
+
+The two runs after the change agree closely — 27% and 28% on independent samples — which is more
+convincing than either alone.
+
+**These rates are corrected.** The runner originally divided flagged answers by every answer it had
+"checked", including refusals that had no claims to judge at all. That reported 35%, 25% and 16%
+for the three runs, diluted by however many refusals each happened to contain. It is the same defect
+the retrieval report carried, where negative cases scoring 0 by construction were averaged into
+recall — found and fixed the same day, then reintroduced in a new harness. The denominator is now
+answers that actually had a claim.
 
 **That aggregate is two answers, and it is confounded.** Ten questions, two trials each, is not a
 sample that can carry a 10-point claim. The per-question view is the honest one:
@@ -61,9 +72,13 @@ and the checker holding precision at 1.000 across both runs.
 
 Re-measure with more trials before quoting a rate anywhere.
 
-## Cost
+## Cost, and why the longer run is not simply better
 
-Four of twenty answers had entailment skipped on rate limiting, against three before, despite 4s
-pacing between requests. The pacing is client-side; the ceiling is tokens per minute, and synthesis,
-grading and entailment now compete for it. That is the binding constraint on this deployment, not
-the extra call.
+**19 of 50 answers went unchecked on the 5-trial run** — the provider's per-minute ceiling — despite
+25 seconds of pacing between requests. Pacing is client-side; the ceiling is tokens per minute, and
+synthesis, grading and entailment compete for it. Waiting longer between questions does not help
+when a single question spends three calls.
+
+So the larger sample bought less than its size suggests: 50 answers yielded 18 judgements, against
+15 from a run a third the length. That is the binding constraint on measuring this deployment, and
+it is worth knowing before anyone plans a bigger run expecting proportionally more signal.

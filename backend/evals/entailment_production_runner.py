@@ -88,13 +88,21 @@ async def run(
                 )
 
     checked = [a for a in answers if a["checked"]]
-    with_flag = [a for a in checked if a["flagged"]]
+    # An answer with no citations had no claim to judge, so including it measures how often the
+    # corpus refuses rather than how often the writer overreaches. Diluting a rate with cases that
+    # cannot contribute to it is the same defect the retrieval report carried for months, where
+    # negative cases scoring 0 by construction were averaged into recall.
+    judged = [a for a in checked if "No cited claim" not in a["summary"]]
+    with_flag = [a for a in judged if a["flagged"]]
     return {
         "answers": len(answers),
         "checked": len(checked),
+        "judged": len(judged),
+        "refusals": len(checked) - len(judged),
+        "not_checked": len(answers) - len(checked),
         "answers_with_a_flag": len(with_flag),
-        "flag_rate": len(with_flag) / len(checked) if checked else 0.0,
-        "graded_correct": sum(1 for a in checked if a["grade"] == "correct") ,
+        "flag_rate": len(with_flag) / len(judged) if judged else 0.0,
+        "graded_correct": sum(1 for a in checked if a["grade"] == "correct"),
         "results": answers,
     }
 
@@ -104,10 +112,12 @@ def render_markdown(summary: dict) -> str:
     lines = [
         "# Entailment on real answers",
         "",
-        f"- Answers checked: {summary['checked']} of {summary['answers']}",
-        f"- **Answers with at least one flagged claim: {summary['answers_with_a_flag']} "
-        f"({rate:.0%})**",
-        f"- Still graded `correct`: {summary['graded_correct']}",
+        f"- Answers: {summary['answers']} — {summary['judged']} with claims to judge, "
+        f"{summary['refusals']} refusals with none, "
+        f"{summary['not_checked']} unchecked (provider rate limit)",
+        f"- **Flagged, of the {summary['judged']} that had claims: "
+        f"{summary['answers_with_a_flag']} ({rate:.0%})**",
+        f"- Graded `correct`: {summary['graded_correct']}",
         "",
         "| Question | Trial | Grade | Cites | Entailment |",
         "|---|---:|---|---:|---|",
