@@ -78,6 +78,15 @@ class Settings(BaseSettings):
     # rules it out for anything that has to keep working.
     hosted_model: str = Field(default="openai/gpt-oss-120b", alias="HOSTED_MODEL")
     hosted_grader_model: str = Field(default="openai/gpt-oss-20b", alias="HOSTED_GRADER_MODEL")
+    # Separately configurable so it can be moved off the grader's model, but it defaults to the same
+    # one: the provider offers two production models and the other is the writer's. So grading and
+    # entailment do share a per-model daily budget today, which is worth stating rather than
+    # implying otherwise -- see the rate_limit_daily arithmetic below. The grader-class size is
+    # right regardless: judging whether a passage states a claim is the same shape of task as
+    # judging whether it answers a question.
+    hosted_entailment_model: str = Field(
+        default="openai/gpt-oss-20b", alias="HOSTED_ENTAILMENT_MODEL"
+    )
     # The counterpart of `ollama_think`, and the same trap. Measured on gpt-oss-20b for a
     # grading-shaped call: default effort spent 190 of 205 completion tokens on reasoning against
     # 25 of 63 at "low", for 3x the latency on a job that returns one bit. Free-tier tokens are
@@ -145,18 +154,20 @@ class Settings(BaseSettings):
     rate_limit_per_client: int = Field(default=20, alias="RATE_LIMIT_PER_CLIENT")
     rate_limit_global: int = Field(default=60, alias="RATE_LIMIT_GLOBAL")
     rate_limit_window_seconds: float = Field(default=60.0, alias="RATE_LIMIT_WINDOW_SECONDS")
-    # Groq's free tier allows 1,000 requests per day per model. One RAG question costs several
-    # calls, so 400 questions is the conservative read of that ceiling rather than a round number,
-    # and it leaves headroom for the eval suites, which run against the same organization.
+    # Groq's free tier allows 1,000 requests per day per model, and the binding one is the
+    # grader-class model: a RAG question spends one grading call plus one entailment call on it, and
+    # up to three gradings when the corrective loop runs. At 400 questions that is 800 calls
+    # typically and past the ceiling in the worst case, so entailment brought this down to 300.
     # Only /query is counted; see MODEL_PATHS in ratelimit.py for why that matters.
+    rate_limit_daily: int = Field(default=300, alias="RATE_LIMIT_DAILY")
+    rate_limit_daily_window_seconds: float = Field(
+        default=86_400.0, alias="RATE_LIMIT_DAILY_WINDOW_SECONDS"
+    )
+
     # Off by default so importing the app never reaches the network -- the test suite builds it
     # repeatedly. The deployment turns it on, because the instance is stopped between demos and
     # waking it is exactly when the index is most stale.
     startup_sync_enabled: bool = Field(default=False, alias="STARTUP_SYNC_ENABLED")
-    rate_limit_daily: int = Field(default=400, alias="RATE_LIMIT_DAILY")
-    rate_limit_daily_window_seconds: float = Field(
-        default=86_400.0, alias="RATE_LIMIT_DAILY_WINDOW_SECONDS"
-    )
 
     backend_cors_origins: str = Field(default="http://localhost:3000", alias="BACKEND_CORS_ORIGINS")
 

@@ -15,6 +15,9 @@ from app.models.schemas import Citation, RetrievalGrade
 CITATION_MARKER = re.compile(r"\[(\d+)\]")
 _SPACE_BEFORE_PUNCTUATION = re.compile(r"\s+([.,;:!?])")
 _REPEATED_SPACE = re.compile(r"[ \t]{2,}")
+# The terminator of the previous sentence, left at the head of the next claim once a marker has
+# been cut out between them.
+_LEADING_TERMINATOR = re.compile(r"^[\s.,;:!?]+")
 
 
 @dataclass(frozen=True)
@@ -46,6 +49,56 @@ class CitationValidation:
                 "against emitted evidence."
             )
         return "No citation emitted and none claimed."
+
+
+@dataclass(frozen=True)
+class ClaimSpan:
+    """One stretch of answer text and the citations offered as support for it."""
+
+    text: str
+    ordinals: list[int]
+
+
+def claim_spans(answer: str) -> list[ClaimSpan]:
+    """Split an answer into the claims its markers are offered as support for.
+
+    Segmented by marker rather than by sentence, deliberately. The synthesis prompt asks for a
+    marker on every factual sentence, but real output does not comply: a recorded run ends a
+    two-sentence paragraph with a single trailing marker, leaving the first sentence unmarked. So
+    "the sentence carrying this marker" is not well defined on the text the model actually
+    produces, and a sentence splitter would impose a precision the output does not have.
+
+    What is well defined is the span a marker terminates: everything since the previous marker, or
+    since the start of the paragraph. That is exactly the text the citation is offered as support
+    for, it needs no natural-language processing, and it cannot disagree with itself.
+
+    Consecutive markers form one claim -- "...as measured [2][5]." rests on two sources, which is
+    the shape the prompt asks for. Text after the last marker carries no citation and is not
+    returned: there is no claim of support to check.
+    """
+    spans: list[ClaimSpan] = []
+    for paragraph in answer.split("\n\n"):
+        cursor = 0
+        pending = ""
+        open_span: list[int] | None = None
+        for match in CITATION_MARKER.finditer(paragraph):
+            pending += paragraph[cursor : match.start()]
+            cursor = match.end()
+            ordinal = int(match.group(1))
+            if open_span is not None and not _LEADING_TERMINATOR.sub("", pending).strip():
+                # Adjacent marker: same claim, one more source.
+                open_span.append(ordinal)
+            else:
+                text = _LEADING_TERMINATOR.sub("", pending).strip()
+                if text:
+                    open_span = [ordinal]
+                    spans.append(ClaimSpan(text=text, ordinals=open_span))
+                else:
+                    # A marker with nothing before it in this paragraph and no span to join --
+                    # nothing is being claimed, so there is nothing to verify.
+                    open_span = None
+            pending = ""
+    return spans
 
 
 def _strip_markers(answer: str, ordinals: set[int]) -> str:

@@ -17,8 +17,8 @@ const BOUNDS = [
   },
   {
     tag: "Known limit",
-    title: "Checked for resolution, not entailment",
-    body: "A marker is verified to point at a real source. It is not verified that the sentence carrying it is supported by that source. A larger model lowers the error rate without removing the class.",
+    title: "A claim is a span, not a sentence",
+    body: "Each cited claim is checked against the passage it cites, and one the evidence does not state downgrades the answer. The unit is the text a marker ends, so a paragraph-trailing marker claims the whole paragraph — generous, and honest about it.",
     limit: true
   },
   {

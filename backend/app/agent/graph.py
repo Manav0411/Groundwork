@@ -83,6 +83,7 @@ def build_graph():
     builder.add_node("web_fallback", nodes.web_fallback)
     builder.add_node("settle_evidence", nodes.settle_evidence)
     builder.add_node("synthesize", nodes.synthesize)
+    builder.add_node("entail", nodes.entail)
     builder.add_node("validate", nodes.validate)
 
     builder.add_edge(START, "guardrail")
@@ -126,7 +127,11 @@ def build_graph():
     builder.add_edge("correct", "grade")  # the cycle
     builder.add_edge("web_fallback", "synthesize")
     builder.add_edge("settle_evidence", "synthesize")
-    builder.add_edge("synthesize", "validate")
+    # Entailment sits on this edge alone. `validate` is also reached by the three structured routes,
+    # which answer from one database row and make no model call at all; putting the check here keeps
+    # that true without needing a condition to protect it.
+    builder.add_edge("synthesize", "entail")
+    builder.add_edge("entail", "validate")
     builder.add_edge("validate", END)
 
     return builder.compile()

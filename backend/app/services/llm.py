@@ -357,7 +357,7 @@ class OpenAICompatClient:
         return await self._post(payload, None)
 
 
-ChatRole = Literal["grader", "synthesis"]
+ChatRole = Literal["grader", "synthesis", "entailment"]
 
 
 class _CountingChatClient:
@@ -426,18 +426,37 @@ def chat_client(role: ChatRole) -> ChatClient:
     `grading.py` previously passed `model=settings.grader_model` explicitly, which leaked Ollama's
     naming into a module that has no business with it.
 
-    The two roles are separate models on purpose. Locally that was forced by memory -- one model had
-    to serve both -- and hosted it is forced by rate limits, which are counted per model, so a
-    corrective loop cannot exhaust the budget the answer still needs.
+    The roles are separate models on purpose. Locally that was forced by memory -- one model had to
+    serve all of them -- and hosted it is forced by rate limits, which are counted per model, so a
+    corrective loop cannot exhaust the budget the answer still needs. Entailment gets its own id for
+    that reason: it runs on every synthesised answer, and sharing the grader's bucket would mean a
+    checked answer competes with the grading that produced it.
+
+    A mapping rather than the pair of ternaries this used to be. With two roles a boolean read
+    fine; with three it would have silently sent entailment to the synthesis model.
     """
-    is_grader = role == "grader"
-    timeout = settings.grader_timeout_seconds if is_grader else settings.llm_timeout_seconds
+    hosted_models: dict[ChatRole, str] = {
+        "grader": settings.hosted_grader_model,
+        "synthesis": settings.hosted_model,
+        "entailment": settings.hosted_entailment_model,
+    }
+    local_models: dict[ChatRole, str] = {
+        "grader": settings.grader_model,
+        "synthesis": settings.ollama_model,
+        "entailment": settings.grader_model,
+    }
+    timeouts: dict[ChatRole, float] = {
+        "grader": settings.grader_timeout_seconds,
+        "synthesis": settings.llm_timeout_seconds,
+        "entailment": settings.grader_timeout_seconds,
+    }
+    timeout = timeouts[role]
     if settings.llm_provider == "openai_compat":
-        model = settings.hosted_grader_model if is_grader else settings.hosted_model
-        client: ChatClient = OpenAICompatClient(model=model, timeout_seconds=timeout)
+        client: ChatClient = OpenAICompatClient(
+            model=hosted_models[role], timeout_seconds=timeout
+        )
     else:
-        model = settings.grader_model if is_grader else settings.ollama_model
-        client = OllamaClient(model=model, timeout_seconds=timeout)
+        client = OllamaClient(model=local_models[role], timeout_seconds=timeout)
     # Counted here rather than inside each client, so both providers report identically and a third
     # implementation cannot forget to.
     return _CountingChatClient(client, provider=settings.llm_provider, role=role)
