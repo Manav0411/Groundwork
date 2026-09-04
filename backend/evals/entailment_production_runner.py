@@ -132,6 +132,9 @@ def render_markdown(summary: dict) -> str:
 async def main() -> int:
     parser = argparse.ArgumentParser(description="Measure entailment on real answers.")
     parser.add_argument("--base-url", default="http://localhost:8000")
+    # Defaults to the configured key so it never has to be typed. A key passed on the command
+    # line is visible in the process table to anyone with a shell on the host, and in shell
+    # history -- which is how APP_API_KEY ended up in a transcript on 2026-09-04.
     parser.add_argument("--api-key", default=settings.app_api_key)
     parser.add_argument("--project-id", default="groundwork")
     parser.add_argument("--trials", type=int, default=2)

@@ -7,6 +7,7 @@ from pathlib import Path
 
 import httpx
 
+from app.core.config import settings
 from app.models.schemas import QueryResponse
 from evals.deepeval_semantic import evaluate_semantics
 from evals.deterministic import evaluate_response
@@ -172,7 +173,10 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run the agent evaluation dataset.")
     parser.add_argument("--dataset", type=Path, default=Path("evals/askbase.jsonl"))
     parser.add_argument("--base-url", default="http://localhost:8000")
-    parser.add_argument("--api-key", default="change-me")
+    # Defaults to the configured key so it never has to be typed. A key passed on the command
+    # line is visible in the process table to anyone with a shell on the host, and in shell
+    # history -- which is how APP_API_KEY ended up in a transcript on 2026-09-04.
+    parser.add_argument("--api-key", default=settings.app_api_key)
     parser.add_argument("--json-report", type=Path)
     parser.add_argument("--markdown-report", type=Path)
     parser.add_argument("--fail-under", type=float, default=1.0)
