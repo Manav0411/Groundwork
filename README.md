@@ -12,10 +12,15 @@ It answers two different kinds of question by two different mechanisms, on purpo
 
 | Question | How | Latency |
 |---|---|---|
-| *"What was the last commit by Manav0411?"* | Typed SQL over normalized identities | **20–40 ms**, zero model calls |
-| *"What is the status of GW-3?"* | Typed SQL | 20–40 ms |
-| *"Are all the tasks complete?"* | SQL counting by status category | 20–40 ms |
-| *"Why did we choose the grader model?"* | Hybrid retrieval → grade → cited synthesis | ~1.6 s |
+| *"What was the last commit by Manav0411?"* | Typed SQL over normalized identities | **16 ms**, zero model calls |
+| *"What is the status of GW-3?"* | Typed SQL | 2 ms, zero model calls |
+| *"What was the last conversation on Slack?"* | Typed SQL over thread recency | 3 ms, zero model calls |
+| *"Are all the tasks complete?"* | SQL counting by status category | 4 ms, zero model calls |
+| *"Why did we choose the grader model?"* | Hybrid retrieval → grade → cited synthesis | ~1.6 s, 8 model calls |
+
+Latencies are the sum of each run's own trace durations — the number the trace itself adds up to,
+so it can be checked — measured against the deployed backend with the index freshly synced, median
+of three warm runs. The first call after the instance wakes is an order of magnitude slower.
 
 Exact questions have exactly one right answer, decided by ordering or counting. Routing those
 through embedding similarity does not make the system more general, it makes it confidently wrong —

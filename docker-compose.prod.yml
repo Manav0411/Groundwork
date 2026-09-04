@@ -30,6 +30,11 @@ services:
       # Metal, so generation goes to a hosted provider. See baselines/deployment_inference.md.
       OLLAMA_BASE_URL: http://host.docker.internal:11434
       LLM_PROVIDER: openai_compat
+      # This instance is stopped between demos, so it wakes with an index hours or days old and
+      # every structured answer opens with a staleness caveat. Refreshing on start fixes what the
+      # caveat correctly reported, rather than raising the threshold to stop it reporting.
+      # Set here rather than in .env so the deployment's behaviour is in version control.
+      STARTUP_SYNC_ENABLED: "true"
     restart: unless-stopped
 
   frontend:

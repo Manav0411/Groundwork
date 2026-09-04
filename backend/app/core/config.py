@@ -149,6 +149,10 @@ class Settings(BaseSettings):
     # calls, so 400 questions is the conservative read of that ceiling rather than a round number,
     # and it leaves headroom for the eval suites, which run against the same organization.
     # Only /query is counted; see MODEL_PATHS in ratelimit.py for why that matters.
+    # Off by default so importing the app never reaches the network -- the test suite builds it
+    # repeatedly. The deployment turns it on, because the instance is stopped between demos and
+    # waking it is exactly when the index is most stale.
+    startup_sync_enabled: bool = Field(default=False, alias="STARTUP_SYNC_ENABLED")
     rate_limit_daily: int = Field(default=400, alias="RATE_LIMIT_DAILY")
     rate_limit_daily_window_seconds: float = Field(
         default=86_400.0, alias="RATE_LIMIT_DAILY_WINDOW_SECONDS"
