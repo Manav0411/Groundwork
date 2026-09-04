@@ -36,11 +36,43 @@ def _record() -> RetrievedRecord:
 
 
 def test_every_path_ends_at_citation_validation() -> None:
-    """No route may reach the end without its citations being checked."""
+    """No route may reach the end without its citations being checked.
+
+    The structured routes reach `validate` directly; the synthesis route reaches it through
+    `entail`. Asserted as reachability rather than as a literal edge, so inserting another check on
+    the synthesis path does not fail a test whose point is that nothing skips validation.
+    """
     edges = _edges()
+    outgoing: dict[str, set[str]] = {}
+    for source, target in edges:
+        outgoing.setdefault(source, set()).add(target)
+
+    def reaches(start: str, goal: str, seen: set[str] | None = None) -> bool:
+        seen = seen or set()
+        if start in seen:
+            return False
+        seen.add(start)
+        targets = outgoing.get(start, set())
+        return goal in targets or any(reaches(t, goal, seen) for t in targets)
+
     for terminal in ("structured_github", "structured_jira", "structured_slack", "synthesize"):
-        assert (terminal, "validate") in edges
+        assert reaches(terminal, "validate"), f"{terminal} can end without citation validation"
     assert any(source == "validate" for source, _ in edges)
+
+
+def test_only_the_synthesis_path_is_entailment_checked() -> None:
+    """Entailment costs a model call, and the structured routes are deliberately model-free.
+
+    Placing it on the `synthesize` edge is what keeps that true without a condition guarding it, so
+    the topology is the guarantee and this is what pins it.
+    """
+    edges = _edges()
+
+    assert ("synthesize", "entail") in edges
+    assert ("entail", "validate") in edges
+    for path in ("structured_github", "structured_jira", "structured_slack"):
+        assert (path, "entail") not in edges
+        assert (path, "validate") in edges
 
 
 def test_exact_answer_paths_skip_grading_and_synthesis() -> None:

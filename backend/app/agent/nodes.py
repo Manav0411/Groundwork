@@ -19,7 +19,8 @@ from app.agent.state import AgentState
 from app.connectors.tavily import TavilyConnector, web_results_to_response
 from app.core.config import settings
 from app.models.schemas import RetrievalGrade
-from app.services.citations import CITATION_MARKER, validate_citations
+from app.services.citations import CITATION_MARKER, claim_spans, validate_citations
+from app.services.entailment import check_entailment
 from app.services.grading import grade_retrieval, rewrite_query
 from app.services.llm import (
     build_answer_prompt,
@@ -731,6 +732,46 @@ async def synthesize(state: AgentState) -> AgentState:
                 f"deterministic fallback answer. Error: {exc}"
             )
     return {"answer": answer}
+
+
+async def entail(state: AgentState) -> AgentState:
+    """Check that each cited claim is stated by the evidence it cites.
+
+    On the synthesis edge only. The structured routes reach `validate` by their own edges and are
+    deliberately free of any model call, so this placement keeps them that way without a condition.
+
+    An unsupported claim downgrades the grade and is disclosed. The marker is deliberately left in
+    place: stripping it is what happens to a marker that provably resolves to nothing, which is a
+    fact, whereas this is a judgement, and a wrong one would silently erase a good citation.
+    """
+    answer = state.get("answer", "")
+    evidence = state.get("evidence", [])
+    citations = state.get("citations", [])
+    spans = claim_spans(answer)
+
+    with state["trace"].step("Entailment Check") as step:
+        if not citations or not spans:
+            step.summary = "No cited claim to check."
+            return {}
+        premises = {item.citation_id: item.snippet for item in evidence}
+        result = await check_entailment(spans, premises)
+        step.summary = result.summary
+
+    if not result.unsupported:
+        return {"entailment_result": result}
+
+    # One gap per unsupported claim, quoting it, because "a claim is unsupported" is not actionable
+    # without saying which.
+    gaps = [
+        f"The evidence cited as {' '.join('[' + str(o) + ']' for o in verdict.ordinals)} does not "
+        f"state this claim: \u201c{verdict.text[:160]}\u201d"
+        for verdict in result.unsupported
+    ]
+    return {
+        "entailment_result": result,
+        "retrieval_grade": "ambiguous",
+        "unresolved_gaps": [*state.get("unresolved_gaps", []), *gaps],
+    }
 
 
 async def validate(state: AgentState) -> AgentState:

@@ -78,6 +78,13 @@ class Settings(BaseSettings):
     # rules it out for anything that has to keep working.
     hosted_model: str = Field(default="openai/gpt-oss-120b", alias="HOSTED_MODEL")
     hosted_grader_model: str = Field(default="openai/gpt-oss-20b", alias="HOSTED_GRADER_MODEL")
+    # Its own model id rather than the grader's, because Groq counts limits per model and this runs
+    # on every synthesised answer. Sharing a bucket would make a checked answer compete with the
+    # grading that produced it. The grader-class model is the right size: judging whether a passage
+    # states a claim is the same shape of task as judging whether it answers a question.
+    hosted_entailment_model: str = Field(
+        default="openai/gpt-oss-20b", alias="HOSTED_ENTAILMENT_MODEL"
+    )
     # The counterpart of `ollama_think`, and the same trap. Measured on gpt-oss-20b for a
     # grading-shaped call: default effort spent 190 of 205 completion tokens on reasoning against
     # 25 of 63 at "low", for 3x the latency on a job that returns one bit. Free-tier tokens are

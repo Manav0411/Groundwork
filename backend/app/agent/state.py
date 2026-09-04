@@ -10,6 +10,7 @@ from app.models.schemas import (
     QueryRequest,
     RetrievalGrade,
 )
+from app.services.entailment import EntailmentResult
 from app.services.grading import GradeResult
 from app.services.retrieval import RetrievedRecord
 
@@ -41,6 +42,7 @@ class AgentState(TypedDict, total=False):
     evidence: list[EvidenceItem]
     citations: list[Citation]
     grade_result: GradeResult | None
+    entailment_result: EntailmentResult | None
     web_results: list
 
     retrieval_grade: RetrievalGrade
