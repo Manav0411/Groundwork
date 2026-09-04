@@ -501,6 +501,12 @@ def build_answer_prompt(
     # uncited. The requirement was true but buried in a paragraph of prose. Stating it as a rule
     # list, showing the shape once, and naming the ids as a closed set are all cheaper than paying
     # for a second generation on a third of every question.
+    #
+    # The grounding block is the same lesson applied a second time. "Answer only from the supplied
+    # evidence" was already here and did not prevent any of it, because the writer believes it is
+    # complying -- every sentence really is loosely derived from a passage. The failures are about
+    # *adding* to what a passage says, so the rules name the four ways it actually did, measured by
+    # hand-adjudicating every flagged claim in `baselines/entailment_production_2026-09-04.md`.
     system_prompt = (
         "You are an engineering project intelligence agent. Answer only from the supplied "
         "evidence.\n\n"
@@ -513,6 +519,16 @@ def build_answer_prompt(
         "Required shape:\n"
         "  The grader stayed at 3B because the larger candidate scored worse on the same "
         "retrieval set [2]. The choice was recorded in configuration rather than code [5].\n\n"
+        "Grounding. Check each sentence against its evidence line before writing it. Measured "
+        "failures, in order of how often they happened:\n"
+        "- Do not add a detail the line does not contain -- no date, quantity, cause or name of "
+        "your own\n"
+        "- Do not call anything the latest, first or most recent unless the line says so\n"
+        "- Do not turn a finding into a reason: a measurement that ruled an option out is not a "
+        "benefit of it\n"
+        "- Do not merge two lines into one statement that neither of them makes\n"
+        "- If part of a sentence is not in its evidence, cut that part rather than citing the line "
+        "anyway\n\n"
         "If evidence is missing, say what is missing instead of inventing facts. Keep the answer "
         "concise."
     )

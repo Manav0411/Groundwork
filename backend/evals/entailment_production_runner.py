@@ -41,7 +41,9 @@ QUESTIONS = [
 ]
 
 
-async def run(base_url: str, api_key: str, project_id: str, trials: int) -> dict:
+async def run(
+    base_url: str, api_key: str, project_id: str, trials: int, delay: float = 0.0
+) -> dict:
     answers = []
     async with httpx.AsyncClient(base_url=base_url, timeout=httpx.Timeout(180)) as client:
         for question in QUESTIONS:
@@ -68,6 +70,11 @@ async def run(base_url: str, api_key: str, project_id: str, trials: int) -> dict
                     for gap in body["unresolved_gaps"]
                     if "does not state this claim" in gap
                 ]
+                if delay:
+                    # Paced so this can run against the deployed backend without disabling its rate
+                    # limiter. The limiter is production behaviour; turning it off to measure would
+                    # be measuring a configuration nobody runs.
+                    await asyncio.sleep(delay)
                 answers.append(
                     {
                         "question": question,
@@ -128,11 +135,14 @@ async def main() -> int:
     parser.add_argument("--api-key", default=settings.app_api_key)
     parser.add_argument("--project-id", default="groundwork")
     parser.add_argument("--trials", type=int, default=2)
+    parser.add_argument("--delay", type=float, default=0.0)
     parser.add_argument("--markdown-report")
     parser.add_argument("--json-report")
     args = parser.parse_args()
 
-    summary = await run(args.base_url, args.api_key, args.project_id, args.trials)
+    summary = await run(
+        args.base_url, args.api_key, args.project_id, args.trials, args.delay
+    )
     report = render_markdown(summary)
     print(report)
     if args.markdown_report:
