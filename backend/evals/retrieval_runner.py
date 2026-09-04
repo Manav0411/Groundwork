@@ -134,10 +134,22 @@ async def run(
     database_url: str,
     ks: Sequence[int],
     use_embeddings: bool,
+    embedder: object | None = None,
+    **fusion: object,
 ) -> RetrievalSummary:
+    """Score one retrieval configuration over the dataset.
+
+    `fusion` is forwarded to `hybrid_retrieve` (`rrf_k`, `candidate_depth`, `lexical_weight`,
+    `vector_weight`). Passing nothing measures the shipped constants, which is what every existing
+    baseline recorded; the sweep in `retrieval_sweep.py` is the only caller that varies them.
+
+    `embedder` substitutes the client used for the query vector. The sweep passes a cache so that
+    scoring N configurations costs N x cases SQL queries but only one embedding call per case --
+    `hybrid_retrieve` recomputes the query embedding on every call and nothing else memoises it.
+    """
     engine = create_async_engine(database_url)
     factory = async_sessionmaker(engine, expire_on_commit=False)
-    ollama = OllamaClient() if use_embeddings else None
+    ollama = embedder if embedder is not None else (OllamaClient() if use_embeddings else None)
     results: list[CaseMetrics] = []
     try:
         async with factory() as session:
@@ -148,6 +160,7 @@ async def run(
                     query=case.query,
                     limit=max(ks),
                     ollama=ollama,
+                    **fusion,
                 )
                 retrieved = await _external_ids(session, records)
                 relevant = set(case.relevant_external_ids)
