@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.db.models import ConnectorSyncState, DocumentChunk, SourceDocument
+from app.services.identity import group_by_shared_identity, normalize_identity
 from app.services.retrieval import RetrievedRecord
 
 AUTHOR_PATTERN = re.compile(
@@ -118,7 +119,8 @@ def describe_offset(offset: int) -> str:
 
 
 def normalize_author_identity(author: str) -> str:
-    return " ".join(author.casefold().split())
+    """Kept as the name this module has always exported; the rule lives in `identity`."""
+    return normalize_identity(author)
 
 
 async def _sync_freshness(session: AsyncSession, project_id: str) -> tuple[datetime | None, bool]:
@@ -284,11 +286,22 @@ async def latest_commit_by_author(
         for item in recent_rows
         if any(normalized in identity for identity in item.SourceDocument.author_identities)
     ]
+    # Cluster by shared identity token rather than by display name. Keying on the display name
+    # meant one human reported two ways -- `Manav0411` on some commits and `Manav Goel` on others,
+    # same login and same email -- came back as an ambiguity and was refused, even though the
+    # identity arrays overlapped plainly. The exact-match path above unified them, so this only
+    # ever surfaced on a partial query.
+    clusters = group_by_shared_identity(
+        [list(item.SourceDocument.author_identities) for item in partial_rows]
+    )
     candidates = sorted(
-        {item.SourceDocument.author or "Unknown author" for item in partial_rows},
+        {
+            partial_rows[cluster[0]].SourceDocument.author or "Unknown author"
+            for cluster in clusters
+        },
         key=str.casefold,
     )
-    if len({candidate.casefold() for candidate in candidates}) == 1 and partial_rows:
+    if len(clusters) == 1 and partial_rows:
         partial_start = _anchor_index(partial_rows, anchor_sha)
         if partial_start is None:
             partial_start = 0

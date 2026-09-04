@@ -54,11 +54,16 @@ def _issue(
     category: str = "indeterminate",
     priority: str | None = "Medium",
     assignee: str | None = "Raghav Rao",
+    account_id: str | None = None,
     labels: list[str] | None = None,
     updated: str = "2026-08-01T09:00:00Z",
 ) -> JiraIssue:
+    # `account_id` defaults to one derived from the display name, so two spellings of the same
+    # person can be given the same account by passing it explicitly.
     user = (
-        JiraUser(display_name=assignee, account_id=f"acct-{assignee}", email=None)
+        JiraUser(
+            display_name=assignee, account_id=account_id or f"acct-{assignee}", email=None
+        )
         if assignee
         else None
     )
@@ -714,3 +719,129 @@ async def test_no_author_on_an_empty_project_is_not_found(session, project) -> N
 
     assert lookup.status == "not_found"
     assert lookup.record is None
+
+
+# --- GW-9: identity resolution under more than one contributor ---------------------------------
+
+
+async def test_one_person_under_two_display_names_resolves(session, project) -> None:
+    """The real case in both indexed repos: GitHub reports one human two ways.
+
+    `Manav0411` on some commits and `Manav Goel` on others, same login and same email. An exact
+    query hits the identity array and unifies them, which is why this has never surfaced. A partial
+    query goes down a different path that compares display names, sees two, and refuses.
+    """
+    await _ingest_commits(
+        session,
+        [
+            _commit("a", "Manav0411", login="manav0411", at="2026-08-01T09:00:00Z"),
+            _commit("b", "Manav Goel", login="manav0411", at="2026-08-05T09:00:00Z"),
+        ],
+    )
+
+    lookup = await latest_commit_by_author(session, "test-project", "manav")
+
+    assert lookup.status == "found", f"one human reported as {lookup.status}: {lookup.candidates}"
+    assert lookup.sha == "b"
+
+
+async def test_an_internal_double_space_in_a_name_still_matches(session, project) -> None:
+    """Ingestion and lookup must fold whitespace the same way.
+
+    Ingestion stored `strip().casefold()` while lookup searched for
+    `" ".join(casefold().split())`, so a name carrying a double space was written one way and
+    searched another and could never be found.
+    """
+    await _ingest_commits(
+        session, [_commit("a", "Raghav  Rao", login="raghav-rao", at="2026-08-01T09:00:00Z")]
+    )
+
+    lookup = await latest_commit_by_author(session, "test-project", "Raghav Rao")
+
+    assert lookup.status == "found"
+    assert lookup.sha == "a"
+
+
+async def test_a_partial_query_naming_one_of_several_contributors_resolves(
+    session, project
+) -> None:
+    """Several distinct people indexed, but the query identifies exactly one of them."""
+    await _ingest_commits(
+        session,
+        [
+            _commit("a", "Raghav Rao", login="raghav-rao", at="2026-08-01T09:00:00Z"),
+            _commit("b", "Priya Nair", login="priya-nair", at="2026-08-02T09:00:00Z"),
+            _commit("c", "Sam Okafor", login="sam-okafor", at="2026-08-03T09:00:00Z"),
+        ],
+    )
+
+    lookup = await latest_commit_by_author(session, "test-project", "priya")
+
+    assert lookup.status == "found"
+    assert lookup.sha == "b"
+    assert lookup.author == "Priya Nair"
+
+
+async def test_three_distinct_contributors_sharing_a_prefix_are_all_reported(
+    session, project
+) -> None:
+    """Ambiguity must list everyone who matched, not just the first two."""
+    await _ingest_commits(
+        session,
+        [
+            _commit("a", "Raghav Rao", login="raghav-rao", at="2026-08-01T09:00:00Z"),
+            _commit("b", "Raghav Menon", login="raghav-menon", at="2026-08-02T09:00:00Z"),
+            _commit("c", "Raghav Iyer", login="raghav-iyer", at="2026-08-03T09:00:00Z"),
+        ],
+    )
+
+    lookup = await latest_commit_by_author(session, "test-project", "raghav")
+
+    assert lookup.status == "ambiguous"
+    assert lookup.record is None
+    assert lookup.candidates == ["Raghav Iyer", "Raghav Menon", "Raghav Rao"]
+
+
+async def test_offsets_still_count_within_one_person_when_others_are_indexed(
+    session, project
+) -> None:
+    """The offset path has only ever run on a single-author corpus."""
+    await _ingest_commits(
+        session,
+        [
+            _commit("p1", "Priya Nair", login="priya-nair", at="2026-08-01T09:00:00Z"),
+            _commit("other", "Sam Okafor", login="sam-okafor", at="2026-08-02T09:00:00Z"),
+            _commit("p2", "Priya Nair", login="priya-nair", at="2026-08-03T09:00:00Z"),
+        ],
+    )
+
+    # Newest-first for Priya is p2 then p1; Sam's commit sits between them by date and must not
+    # be counted.
+    assert (await latest_commit_by_author(session, "test-project", "priya")).sha == "p2"
+    assert (await latest_commit_by_author(session, "test-project", "priya", 1)).sha == "p1"
+
+
+async def test_jira_one_person_under_two_display_names_resolves(session, project) -> None:
+    """The GitHub fix applied to the Jira path, so the two cannot drift apart."""
+    await _ingest_issues(
+        session,
+        [
+            _issue(
+                "TEST-1",
+                assignee="Manav Goel",
+                account_id="acct-1",
+                updated="2026-08-01T09:00:00Z",
+            ),
+            _issue(
+                "TEST-2",
+                assignee="Manav0411",
+                account_id="acct-1",
+                updated="2026-08-15T09:00:00Z",
+            ),
+        ],
+    )
+
+    lookup = await jira_issues_by_assignee(session, "test-project", "manav")
+
+    assert lookup.status == "found", f"one human reported as {lookup.status}: {lookup.candidates}"
+    assert [issue.key for issue in lookup.issues] == ["TEST-2", "TEST-1"]
