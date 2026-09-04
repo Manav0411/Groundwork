@@ -61,6 +61,9 @@ class RetrievalSummary(BaseModel):
     embeddings_enabled: bool
     total_cases: int
     ks: list[int]
+    scored_cases: int
+    """Cases the ranking metrics are averaged over -- negatives are excluded."""
+
     mean_recall_at_k: dict[int, float]
     mean_precision_at_k: dict[int, float]
     mrr: float
@@ -68,7 +71,20 @@ class RetrievalSummary(BaseModel):
     """Share of all returned chunks that matched the query lexically at all."""
 
     negative_cases: int
-    negative_cases_returning_nothing: int
-    """A correct negative case returns no evidence, letting the agent grade `incorrect`."""
+    weakest_positive_top_score: float
+    strongest_negative_top_score: float
+    separation_margin: float
+    """How far the best out-of-corpus match sits below the worst in-corpus one.
+
+    This replaces a count of negative cases "returning nothing", which was not a measurement:
+    `hybrid_retrieve` applies no relevance floor, so any project with enough documents returns
+    `limit` of them for every question however irrelevant. That count could only ever be 0, and was
+    printed as though it could be otherwise in every retrieval baseline since Phase 2.
+
+    A margin can fail. Negative when the distributions overlap -- when the strongest thing
+    retrieval finds for an out-of-corpus question outscores the weakest thing it finds for a real
+    one. That is the condition under which retrieval alone cannot tell them apart, which is
+    precisely why the grader exists and not something the harness should be silent about.
+    """
 
     results: list[CaseMetrics]

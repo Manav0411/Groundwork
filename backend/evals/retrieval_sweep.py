@@ -184,7 +184,7 @@ def render_markdown(scored: list[tuple[Configuration, RetrievalSummary]], *, k: 
         f"- Configurations: {len(scored)}",
         f"- Completed: {scored[0][1].completed_at}",
         "",
-        f"| Configuration | Recall@{k} | MRR | Lexical hit rate | Negatives clean |",
+        f"| Configuration | Recall@{k} | MRR | Lexical hit rate | Separation |",
         "|---|---:|---:|---:|---:|",
     ]
     # Ordered by the two metrics that decide adoption, so the reference row's position is itself
@@ -194,10 +194,10 @@ def render_markdown(scored: list[tuple[Configuration, RetrievalSummary]], *, k: 
     )
     for configuration, summary in ranked:
         marker = " **(shipped)**" if configuration.is_shipped else ""
-        clean = f"{summary.negative_cases_returning_nothing}/{summary.negative_cases}"
         lines.append(
             f"| {configuration.label}{marker} | {summary.mean_recall_at_k[k]:.3f} | "
-            f"{summary.mrr:.3f} | {summary.lexical_hit_rate:.3f} | {clean} |"
+            f"{summary.mrr:.3f} | {summary.lexical_hit_rate:.3f} | "
+            f"{summary.separation_margin:+.3f} |"
         )
 
     if shipped is not None:

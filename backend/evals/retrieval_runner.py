@@ -170,27 +170,57 @@ async def run(
     finally:
         await engine.dispose()
 
+    return summarise(
+        results, dataset_name=dataset_name, ks=ks, use_embeddings=use_embeddings
+    )
+
+
+def summarise(
+    results: list[CaseMetrics],
+    *,
+    dataset_name: str,
+    ks: Sequence[int],
+    use_embeddings: bool,
+) -> RetrievalSummary:
+    """Aggregate scored cases into the report summary.
+
+    Split out of `run` so the aggregation rules can be tested without a database. They are
+    rules, not arithmetic: which cases a mean covers, and what a negative case is for.
+    """
     negatives = [item for item in results if item.category == "negative"]
     total_returned = sum(item.returned for item in results)
     total_lexical = sum(item.lexical_hits for item in results)
     scored = [item for item in results if item.category != "negative"]
+
+    # Averaged over positives only, as MRR always was. A negative case has nothing to recall, so it
+    # scores 0 by construction; including them depressed the headline by the share of the dataset
+    # that happened to be negative -- 0.807 against 0.949 at k=8 here -- and made two datasets with
+    # different negative counts look comparable when they were not.
+    denominator = len(scored) or 1
+    positive_tops = [item.top_vector_score for item in scored]
+    negative_tops = [item.top_vector_score for item in negatives]
+    weakest_positive = min(positive_tops, default=0.0)
+    strongest_negative = max(negative_tops, default=0.0)
 
     return RetrievalSummary(
         dataset=dataset_name,
         completed_at=datetime.now(UTC).isoformat(),
         embeddings_enabled=use_embeddings,
         total_cases=len(results),
+        scored_cases=len(scored),
         ks=list(ks),
         mean_recall_at_k={
-            k: sum(item.recall_at_k[k] for item in results) / len(results) for k in ks
+            k: sum(item.recall_at_k[k] for item in scored) / denominator for k in ks
         },
         mean_precision_at_k={
-            k: sum(item.precision_at_k[k] for item in results) / len(results) for k in ks
+            k: sum(item.precision_at_k[k] for item in scored) / denominator for k in ks
         },
         mrr=(sum(item.reciprocal_rank for item in scored) / len(scored)) if scored else 0.0,
         lexical_hit_rate=(total_lexical / total_returned) if total_returned else 0.0,
         negative_cases=len(negatives),
-        negative_cases_returning_nothing=sum(1 for item in negatives if item.returned == 0),
+        weakest_positive_top_score=weakest_positive,
+        strongest_negative_top_score=strongest_negative,
+        separation_margin=weakest_positive - strongest_negative,
         results=results,
     )
 
@@ -201,7 +231,8 @@ def render_markdown(summary: RetrievalSummary) -> str:
         f"# Retrieval report — {summary.dataset}",
         "",
         f"- Completed: {summary.completed_at}",
-        f"- Cases: {summary.total_cases}",
+        f"- Cases: {summary.total_cases} "
+        f"({summary.scored_cases} scored, {summary.negative_cases} negative)",
         f"- Embeddings: {'enabled' if summary.embeddings_enabled else 'disabled (lexical only)'}",
         "",
         "| Metric | " + " | ".join(f"k={k}" for k in ks) + " |",
@@ -209,11 +240,22 @@ def render_markdown(summary: RetrievalSummary) -> str:
         "| Recall@k | " + " | ".join(f"{summary.mean_recall_at_k[k]:.3f}" for k in ks) + " |",
         "| Precision@k | " + " | ".join(f"{summary.mean_precision_at_k[k]:.3f}" for k in ks) + " |",
         "",
-        f"- MRR (excludes negative cases): {summary.mrr:.3f}",
+        f"Ranking metrics are averaged over the {summary.scored_cases} non-negative cases. A "
+        "negative case has nothing to recall, so averaging it in only measures how much of the "
+        "dataset is negative.",
+        "",
+        f"- MRR: {summary.mrr:.3f}",
         f"- Lexical hit rate: {summary.lexical_hit_rate:.3f} "
         "— share of returned chunks matching the query lexically at all",
-        f"- Negative cases returning nothing: "
-        f"{summary.negative_cases_returning_nothing}/{summary.negative_cases}",
+        f"- Separation margin: {summary.separation_margin:+.3f} "
+        f"(weakest in-corpus {summary.weakest_positive_top_score:.3f}, "
+        f"strongest out-of-corpus {summary.strongest_negative_top_score:.3f})"
+        + (
+            " — **overlapping**: the best match for a question the corpus cannot answer"
+            " outscores the worst match for one it can"
+            if summary.separation_margin < 0
+            else ""
+        ),
         "",
         "| Case | Category | R@" + str(ks[-1]) + " | P@" + str(ks[-1]) + " | RR | Returned | Lex |",
         "|---|---|---:|---:|---:|---:|---:|",
