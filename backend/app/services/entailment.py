@@ -37,8 +37,6 @@ A claim is supported only if the evidence states it. Evidence that is merely on 
 or that states something similar but different -- a different number, a reversed comparison, an
 unstated cause -- is NOT support. NONE is a common and correct answer.
 Paraphrasing is fine: the claim need not use the evidence's wording, only its meaning.
-When a claim cites several passages, they count together: quote from any one of them if between
-them they state it. No single passage has to state the whole claim on its own.
 Reply with JSON only:
 {"claims":[{"id":<n>,"quote":"<words or NONE>","supported":true|false}]}"""
 
