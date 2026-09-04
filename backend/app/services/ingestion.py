@@ -12,6 +12,7 @@ from app.connectors.jira import JiraIssue
 from app.connectors.slack import SlackThread
 from app.connectors.synthetic_workspace import get_projects
 from app.db.models import DocumentChunk, Project, SourceDocument
+from app.services.identity import normalize_identities
 from app.services.llm import OllamaClient
 
 
@@ -198,7 +199,7 @@ async def seed_synthetic_workspace(session: AsyncSession) -> dict[str, int]:
 def github_commit_documents(project_id: str, commits: list[GitHubCommit]) -> list[IngestDocument]:
     def identities(commit: GitHubCommit) -> list[str]:
         values = [commit.author, commit.author_email, commit.author_login]
-        return sorted({value.strip().casefold() for value in values if value and value.strip()})
+        return normalize_identities(values)
 
     return [
         IngestDocument(
@@ -236,7 +237,7 @@ def jira_issue_documents(project_id: str, issues: list[JiraIssue]) -> list[Inges
             issue.assignee.account_id,
             issue.assignee.email,
         ]
-        return sorted({value.strip().casefold() for value in values if value and value.strip()})
+        return normalize_identities(values)
 
     documents: list[IngestDocument] = []
     for issue in issues:
@@ -295,13 +296,12 @@ def slack_thread_documents(project_id: str, threads: list[SlackThread]) -> list[
         transcript = " ".join(
             f"{message.author}: {message.text}" for message in thread.messages if message.text
         )
-        identities = sorted(
-            {
-                value.strip().casefold()
+        identities = normalize_identities(
+            [
+                value
                 for message in thread.messages
                 for value in (message.author, message.user_id)
-                if value and value.strip()
-            }
+            ]
         )
         documents.append(
             IngestDocument(

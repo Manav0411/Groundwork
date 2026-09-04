@@ -2,11 +2,12 @@ import re
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import desc, select
+from sqlalchemy import desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.db.models import ConnectorSyncState, DocumentChunk, SourceDocument
+from app.services.identity import group_by_shared_identity, normalize_identity
 from app.services.retrieval import RetrievedRecord
 
 AUTHOR_PATTERN = re.compile(
@@ -68,7 +69,11 @@ PREVIOUS_PATTERN = re.compile(
     r"\b(?:previous|prior|one\s+before|before\s+that|preceding|before\s+(?=[0-9a-f]{7,40}\b))",
     re.IGNORECASE,
 )
+# The lookup reads at most this many commits per author, so positions beyond it cannot be served.
+# It is a window on the answer, not a claim about how many commits the person has: David Lord has
+# 396 in `pallets/flask` and this reads 100 of them.
 MAX_COMMIT_OFFSET = 99
+COMMIT_WINDOW = MAX_COMMIT_OFFSET + 1
 
 
 def extract_commit_author(query: str) -> str | None:
@@ -103,8 +108,11 @@ def extract_commit_offset(query: str) -> int:
     if match:
         numeric, word = match.group(1), match.group(2)
         # An out-of-range position is answered by refusing, not by clamping into a real commit.
+        # It used to clamp here, so "the 105th commit" quietly became the 100th and came back as a
+        # confident answer -- the exact failure this comment already claimed to prevent. The true
+        # position is returned and the lookup decides whether it can be served.
         if numeric is not None:
-            return min(max(int(numeric) - 1, 0), MAX_COMMIT_OFFSET)
+            return max(int(numeric) - 1, 0)
         return ORDINAL_WORDS[word.casefold()]
     if PREVIOUS_PATTERN.search(query):
         return 1
@@ -118,7 +126,8 @@ def describe_offset(offset: int) -> str:
 
 
 def normalize_author_identity(author: str) -> str:
-    return " ".join(author.casefold().split())
+    """Kept as the name this module has always exported; the rule lives in `identity`."""
+    return normalize_identity(author)
 
 
 async def _sync_freshness(session: AsyncSession, project_id: str) -> tuple[datetime | None, bool]:
@@ -149,6 +158,23 @@ def _record_from_row(row) -> RetrievedRecord:
         lexical_score=1.0,
         vector_score=0.0,
     )
+
+
+# Tokens are joined with a unit separator, never a space, so a pattern can never match across two
+# identities: ["raghav", "rao"] must not answer a search for "raghav ra".
+_IDENTITY_SEPARATOR = "\x1f"
+
+
+def _identity_contains(normalized: str):
+    """SQL predicate: some identity token contains `normalized` as a substring.
+
+    The Python equivalent (`any(normalized in identity for identity in ...)`) can only see rows
+    already loaded, which is what tied ambiguity detection to a recency window. Expressed in SQL it
+    applies to the whole project.
+    """
+    escaped = normalized.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+    joined = func.array_to_string(SourceDocument.author_identities, _IDENTITY_SEPARATOR)
+    return joined.like(f"%{escaped}%", escape="\\")
 
 
 def _anchor_index(rows, anchor_sha: str | None) -> int | None:
@@ -186,7 +212,9 @@ async def latest_commit_by_author(
     and offsets are identical either way; only the filter differs, so both paths share everything
     below.
     """
-    offset = max(0, min(offset, MAX_COMMIT_OFFSET))
+    # Not clamped: a position past the end has to reach the range check below, or it is answered
+    # with the last commit that does exist.
+    offset = max(0, offset)
     last_synced_at, stale = await _sync_freshness(session, project_id)
     base = (
         select(SourceDocument, DocumentChunk)
@@ -272,23 +300,52 @@ async def latest_commit_by_author(
             available=0,
         )
 
-    recent_rows = (
+    # Whether the question is ambiguous is decided over every contributor, not a recent slice.
+    # This used to fetch the 100 newest commits and filter them in Python, which made the check
+    # blind to anyone whose latest commit fell outside that window: on a 500-commit repository
+    # with 51 contributors, only 9 of them appeared in it. A query matching two people then
+    # resolved confidently to whichever one happened to be recent -- the confidently-wrong answer
+    # this whole path exists to avoid. Measured on `pallets/flask`: "davi" matches David Lord
+    # (396 commits, newest) and David (1 commit, 198th), and answered as David Lord.
+    #
+    # The projection is deliberate. Deciding needs names and identities, not documents, so this
+    # stays cheap enough to run unbounded while the row fetch below stays capped.
+    matching = (
         await session.execute(
-            base.order_by(desc(SourceDocument.source_created_at), desc(SourceDocument.id)).limit(
-                100
+            select(SourceDocument.author, SourceDocument.author_identities)
+            .where(
+                SourceDocument.project_id == project_id,
+                SourceDocument.source_type == "github",
+                _identity_contains(normalized),
             )
+            .distinct()
         )
     ).all()
-    partial_rows = [
-        item
-        for item in recent_rows
-        if any(normalized in identity for identity in item.SourceDocument.author_identities)
-    ]
-    candidates = sorted(
-        {item.SourceDocument.author or "Unknown author" for item in partial_rows},
+    # Cluster by shared identity token rather than by display name. Keying on the display name
+    # meant one human reported two ways -- `Manav0411` on some commits and `Manav Goel` on others,
+    # same login and same email -- came back as an ambiguity and was refused, even though the
+    # identity arrays overlapped plainly. The exact-match path above unified them, so this only
+    # ever surfaced on a partial query.
+    identity_clusters = group_by_shared_identity([list(row[1]) for row in matching])
+    distinct_people = sorted(
+        {matching[cluster[0]][0] or "Unknown author" for cluster in identity_clusters},
         key=str.casefold,
     )
-    if len({candidate.casefold() for candidate in candidates}) == 1 and partial_rows:
+
+    partial_rows = (
+        (
+            await session.execute(
+                base.where(_identity_contains(normalized))
+                .order_by(desc(SourceDocument.source_created_at), desc(SourceDocument.id))
+                .limit(100)
+            )
+        ).all()
+        if len(identity_clusters) == 1
+        else []
+    )
+    clusters = identity_clusters
+    candidates = distinct_people
+    if len(clusters) == 1 and partial_rows:
         partial_start = _anchor_index(partial_rows, anchor_sha)
         if partial_start is None:
             partial_start = 0

@@ -141,12 +141,17 @@ def test_askbase_dataset_is_valid_and_unique() -> None:
     dataset = Path(__file__).parents[1] / "evals" / "askbase.jsonl"
     cases = load_cases(dataset)
 
-    assert len(cases) == 16
+    assert len(cases) == 17
     assert len({case.id for case in cases}) == len(cases)
+    # `input_guardrail` used to be here, covering three cases that asserted "What was the latest
+    # commit?" is answered by asking for an author. It is answered with the latest commit now, so
+    # those became ordinary exact-answer cases. `ambiguity` replaces it as the category that
+    # matters most: it is the one asserting the system refuses rather than guesses.
     assert {case.category for case in cases} >= {
+        "ambiguity",
         "exact_answer",
         "failure_disclosure",
-        "input_guardrail",
+        "identity_resolution",
         "project_isolation",
     }
 

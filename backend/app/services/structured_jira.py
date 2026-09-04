@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.db.models import ConnectorSyncState, DocumentChunk, SourceDocument
+from app.services.identity import group_by_shared_identity, normalize_identity
 from app.services.retrieval import RetrievedRecord
 
 ISSUE_KEY_PATTERN = re.compile(r"\b([A-Z][A-Z0-9_]{1,19}-\d+)\b", re.IGNORECASE)
@@ -179,7 +180,7 @@ async def open_jira_blockers(session: AsyncSession, project_id: str) -> JiraLook
 async def jira_issues_by_assignee(
     session: AsyncSession, project_id: str, assignee_query: str
 ) -> JiraLookup:
-    normalized = " ".join(assignee_query.casefold().split())
+    normalized = normalize_identity(assignee_query)
     last_synced_at, stale = await _sync_freshness(session, project_id)
     base = _base_query(project_id)
     exact_rows = (
@@ -205,15 +206,21 @@ async def jira_issues_by_assignee(
         for row in recent_rows
         if any(normalized in identity for identity in row.SourceDocument.author_identities)
     ]
+    # Same rule as the GitHub path, for the same reason: keying on the display name reports one
+    # person recorded under two spellings as an ambiguity. Letting the two drift apart is how the
+    # bug would come back on one side only.
+    clusters = group_by_shared_identity(
+        [list(row.SourceDocument.author_identities) for row in partial_rows]
+    )
     candidates = sorted(
         {
-            str(row.SourceDocument.source_metadata.get("assignee"))
-            for row in partial_rows
-            if row.SourceDocument.source_metadata.get("assignee")
+            str(partial_rows[cluster[0]].SourceDocument.source_metadata.get("assignee"))
+            for cluster in clusters
+            if partial_rows[cluster[0]].SourceDocument.source_metadata.get("assignee")
         },
         key=str.casefold,
     )
-    if len({candidate.casefold() for candidate in candidates}) == 1 and partial_rows:
+    if len(clusters) == 1 and partial_rows:
         return JiraLookup(
             status="found",
             issues=[_issue_from_row(row) for row in partial_rows[:20]],
