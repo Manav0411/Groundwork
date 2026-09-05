@@ -82,15 +82,21 @@ export function AnswerCard({
       </div>
 
       {/* An answer can be graded down without being refused — most often
-          because the index is older than its staleness threshold. The backend
-          says why in `unresolved_gaps`; dropping that leaves a reader with a
-          coloured chip and no reason for it. */}
+          because the index is older than its staleness threshold, and since
+          entailment checking, because a claim is not stated by the evidence it
+          cites. The backend says why in `unresolved_gaps`; dropping that leaves
+          a reader with a coloured chip and no reason for it.
+
+          Capped to a reading measure like the prose above. An entailment gap
+          quotes the claim it is about and runs to roughly 160 characters, which
+          on a wide card set as one unbroken mono line is the width of the whole
+          answer — the only text on the surface not respecting a measure. */}
       {answer.unresolved_gaps.length > 0 ? (
         <div className="border-t border-ruleSoft px-3.5 py-3.5">
           <p className="m-0 mb-2 font-mono text-[10px] font-semibold uppercase tracking-[0.16em] text-warn">
             {answer.unresolved_gaps.length === 1 ? "Caveat" : "Caveats"}
           </p>
-          <ul className="m-0 list-none p-0">
+          <ul className="m-0 max-w-[92ch] list-none p-0">
             {answer.unresolved_gaps.map((gap) => (
               <li
                 className="break-identifier relative py-1 pl-5 font-mono text-[11.5px] leading-relaxed text-ink2"
