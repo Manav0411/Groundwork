@@ -24,6 +24,7 @@ from app.services.ingestion import (
 from app.services.structured_github import (
     commit_by_sha,
     latest_commit_by_author,
+    recent_commits,
 )
 from app.services.structured_jira import (
     jira_issue_by_key,
@@ -911,3 +912,39 @@ async def test_a_position_past_the_lookup_window_is_refused_not_clamped(session,
     assert lookup.record is None and lookup.sha is None
     assert lookup.offset == 104
 
+
+
+async def test_recent_commits_returns_the_newest_first(session, project) -> None:
+    """The ordering is the answer. Retrieval cannot read it, which is why this route exists."""
+    await _ingest_commits(
+        session,
+        [
+            _commit("old", "A", login="a", at="2026-08-01T09:00:00Z"),
+            _commit("newest", "B", login="b", at="2026-08-20T09:00:00Z"),
+            _commit("middle", "C", login="c", at="2026-08-10T09:00:00Z"),
+        ],
+    )
+
+    records, _, _ = await recent_commits(session, "test-project", limit=3)
+
+    assert [r.title for r in records] == ["Work in newest", "Work in middle", "Work in old"]
+
+
+async def test_recent_commits_respects_its_limit(session, project) -> None:
+    await _ingest_commits(
+        session,
+        [
+            _commit(f"c{i}", "A", login="a", at=f"2026-08-{i + 1:02d}T09:00:00Z")
+            for i in range(6)
+        ],
+    )
+
+    records, _, _ = await recent_commits(session, "test-project", limit=2)
+
+    assert len(records) == 2
+
+
+async def test_recent_commits_on_an_empty_project_returns_nothing(session, project) -> None:
+    records, _, _ = await recent_commits(session, "test-project")
+
+    assert records == []

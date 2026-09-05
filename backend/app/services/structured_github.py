@@ -389,6 +389,39 @@ async def latest_commit_by_author(
     )
 
 
+async def recent_commits(
+    session: AsyncSession, project_id: str, limit: int = 3
+) -> tuple[list[RetrievedRecord], datetime | None, bool]:
+    """The newest commits in the project, by commit time.
+
+    Recency is a property of the ordering, which is exactly what semantic retrieval cannot read.
+    Asked "what changed recently", the RAG path returns topically relevant recent-ish work and the
+    writer infers a superlative nobody wrote down -- measured at 4 failures in 5 runs on one
+    question in `baselines/prompt_fencing_2026-09-05.md`.
+
+    Returns the records plus sync freshness, so the caller can disclose staleness the same way
+    every other structured lookup does.
+    """
+    last_synced_at, stale = await _sync_freshness(session, project_id)
+    rows = (
+        await session.execute(
+            select(SourceDocument, DocumentChunk)
+            .join(
+                DocumentChunk,
+                (DocumentChunk.document_id == SourceDocument.id)
+                & (DocumentChunk.chunk_index == 0),
+            )
+            .where(
+                SourceDocument.project_id == project_id,
+                SourceDocument.source_type == "github",
+            )
+            .order_by(desc(SourceDocument.source_created_at), desc(SourceDocument.id))
+            .limit(max(1, limit))
+        )
+    ).all()
+    return [_record_from_row(row) for row in rows], last_synced_at, stale
+
+
 async def commit_by_sha(session: AsyncSession, project_id: str, sha: str) -> LatestCommitLookup:
     """Look up one commit by hash, exactly.
 

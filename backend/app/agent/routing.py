@@ -56,6 +56,22 @@ AGGREGATE_PATTERN = re.compile(
 )
 
 
+# "What was the last feature added?", "what changed recently". A recency question about the
+# project as a whole rather than about one commit, one thread or one issue. Both halves are
+# required: "recent" alone is a qualifier and "feature" alone is a topic question that belongs on
+# retrieval.
+# "recently" is not in LATEST_PATTERN, and adding it there would widen a pattern the commit, Slack
+# and offset rules all depend on. This rule gets its own qualifier instead.
+RECENT_QUALIFIER_PATTERN = re.compile(
+    r"\b(?:latest|last|most\s+recent|recently|newest)\b", re.IGNORECASE
+)
+RECENT_SUBJECT_PATTERN = re.compile(
+    r"\b(?:features?|changes?|changed|updates?|shipped|released|releases?|added|additions?|"
+    r"work|activity|progress)\b",
+    re.IGNORECASE,
+)
+
+
 # Recency over Slack threads. Slack had no structured route at all, so "what was the last
 # conversation on slack?" reached hybrid retrieval, where the ranking is semantic and the
 # question carries no semantics to rank on: the grader rejected every chunk across two
@@ -113,13 +129,21 @@ def classify_query(query: str) -> QueryType:
     ):
         return "latest_slack_thread"
 
-    # 6. A question about the issue set rather than about one issue. Ordered after the exact
+    # 6. Recency about the project rather than about one record. Ordered after the commit and
+    #    Slack rules, which are more specific -- "the last commit" names the record type it wants,
+    #    and this must not take it. Retrieval cannot answer these at all: recency lives in the
+    #    ordering, so the writer is handed topically relevant recent-ish work and infers a
+    #    superlative nobody wrote down. Measured at 4 failures in 5 runs before this route existed.
+    if RECENT_SUBJECT_PATTERN.search(query) and RECENT_QUALIFIER_PATTERN.search(query):
+        return "recent_activity"
+
+    # 7. A question about the issue set rather than about one issue. Ordered after the exact
     #    identifiers, which name a single record and are more specific, and before the topic
     #    categories, which would send it to retrieval and get it refused.
     if WORK_NOUN_PATTERN.search(query) and AGGREGATE_PATTERN.search(query):
         return "jira_project_status"
 
-    # 7. Topic categories below here all share the hybrid retrieval path; the distinction only
+    # 8. Topic categories below here all share the hybrid retrieval path; the distinction only
     #    labels the trace.
     if BLOCKER_PATTERN.search(query):
         return "blocker_investigation"
@@ -136,6 +160,7 @@ def is_structured(query_type: QueryType) -> bool:
         "jira_assignee",
         "jira_project_status",
         "latest_slack_thread",
+        "recent_activity",
     }
 
 

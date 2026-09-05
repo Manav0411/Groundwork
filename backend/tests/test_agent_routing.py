@@ -185,3 +185,39 @@ def test_the_verb_form_of_blocker_routes_like_the_noun(query: str) -> None:
 def test_a_bare_block_is_not_a_blocker_question() -> None:
     """The obvious over-correction: making the suffix optional swallows "a block of code"."""
     assert classify_query("Which code block changed in the last commit?") != "blocker_investigation"
+
+
+@pytest.mark.parametrize(
+    "query",
+    [
+        "What was the last feature added in this project?",
+        "What changed recently?",
+        "What has shipped recently?",
+        "What was the most recent release?",
+        "What is the latest update?",
+    ],
+)
+def test_project_recency_questions_route_to_the_ordered_lookup(query: str) -> None:
+    """Recency lives in commit time, which semantic retrieval cannot read.
+
+    Before this route existed these reached the RAG path and the writer inferred a superlative
+    nobody had written down -- 4 failures in 5 runs on one question.
+    """
+    assert classify_query(query) == "recent_activity"
+
+
+@pytest.mark.parametrize(
+    ("query", "expected"),
+    [
+        # More specific rules name the record type they want and must win.
+        ("What was the last commit by Manav0411?", "latest_commit"),
+        ("What was the last conversation on slack?", "latest_slack_thread"),
+        ("What is the status of GW-3?", "jira_issue_status"),
+        ("Are all the tasks complete?", "jira_project_status"),
+        # A topic question about features is not a recency question.
+        ("What features does it support?", "weekly_project_brief"),
+        ("Why did we choose the grader model?", "weekly_project_brief"),
+    ],
+)
+def test_the_recency_route_does_not_steal_other_questions(query: str, expected: str) -> None:
+    assert classify_query(query) == expected

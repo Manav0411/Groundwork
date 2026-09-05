@@ -37,6 +37,7 @@ from app.services.structured_github import (
     extract_commit_offset,
     extract_commit_sha,
     latest_commit_by_author,
+    recent_commits,
 )
 from app.services.structured_jira import (
     extract_assignee,
@@ -82,6 +83,7 @@ GREETING_ANSWER = (
     "evidence, with a citation for every claim. For example: \"what was the last commit by "
     "<author>?\", \"what is the status of GW-3?\", or \"why did we choose the grader model?\"."
 )
+RECENT_ACTIVITY_LIMIT = 3
 WEB_SOURCED_GAP = (
     "No indexed project evidence supported this question, so the answer comes from public web "
     "search rather than from this organization's own records."
@@ -732,6 +734,80 @@ async def synthesize(state: AgentState) -> AgentState:
                 f"deterministic fallback answer. Error: {exc}"
             )
     return {"answer": answer}
+
+
+async def structured_recent(state: AgentState) -> AgentState:
+    """What changed recently, answered from the ordering rather than from similarity.
+
+    Recency is a property of commit time. Semantic retrieval cannot read it, so this question used
+    to reach the RAG path, which handed the writer topically relevant recent-ish work and let it
+    infer a superlative nobody had written down -- 4 failures in 5 runs, measured in
+    `baselines/prompt_fencing_2026-09-05.md`.
+
+    It deliberately answers a narrower question than the one asked. "Which feature was added" is not
+    answerable from commit history at all: a commit message records what changed, not which product
+    feature it belonged to. So the answer is the changes, and the gap says the rest.
+    """
+    request, session = state["request"], state["session"]
+    records, gaps = [], []
+    grade: RetrievalGrade = "ambiguous"
+
+    with state["trace"].step("Recent Activity Query") as step:
+        if not state["project_exists"]:
+            answer = (
+                f"Project {request.project_id!r} is not onboarded. Create the project and run a "
+                "GitHub sync before asking what changed."
+            )
+            step.summary = "Project is not available in PostgreSQL."
+            gaps.append("Project has not been onboarded or the database is unavailable.")
+        else:
+            records, last_synced_at, stale = await recent_commits(
+                session,  # type: ignore[arg-type]
+                request.project_id,
+                limit=RECENT_ACTIVITY_LIMIT,
+            )
+            if not records:
+                answer = (
+                    f"No GitHub commits are indexed for {request.project_id}. "
+                    "Run a GitHub sync and ask again."
+                )
+                step.summary = "The project has no indexed commit history."
+                gaps.append("No commit history exists in the currently indexed corpus.")
+            else:
+                lines = []
+                for ordinal, record in enumerate(records, start=1):
+                    when = (
+                        record.source_timestamp.isoformat()
+                        if record.source_timestamp
+                        else "an unknown time"
+                    )
+                    lines.append(f"{record.title} ({when}) [{ordinal}]")
+                answer = (
+                    f"The {len(records)} most recent indexed changes in {request.project_id}, "
+                    "newest first: " + "; ".join(lines) + "."
+                )
+                step.summary = f"Returned the {len(records)} newest commits by commit time."
+                grade = "correct"
+                # The question usually says "feature". The history cannot answer that, and saying
+                # so is the whole reason this route is better than the one it replaced.
+                if COMMIT_CONTENT_PATTERN.search(request.query):
+                    grade = "ambiguous"
+                    gaps.append(COMMIT_CONTENT_GAP)
+                if stale:
+                    grade = "ambiguous"
+                    synced = last_synced_at.isoformat() if last_synced_at else "never"
+                    gaps.append(f"GitHub data may be stale; last successful sync: {synced}.")
+
+    evidence, citations = records_to_response(records)
+    return {
+        "records": records,
+        "evidence": evidence,
+        "citations": citations,
+        "answer": answer,
+        "retrieval_grade": grade,
+        "unresolved_gaps": gaps,
+        "tools_used": ["planner", "structured_recent_query"],
+    }
 
 
 async def entail(state: AgentState) -> AgentState:

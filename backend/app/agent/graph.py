@@ -39,6 +39,8 @@ def _route_after_plan(state: AgentState) -> str:
         return "structured_jira"
     if query_type == "latest_slack_thread":
         return "structured_slack"
+    if query_type == "recent_activity":
+        return "structured_recent"
     # Blocker questions reach the Jira tool only when the project actually has Jira configured;
     # otherwise they are ordinary retrieval questions.
     if query_type == "blocker_investigation" and state.get("jira_configured"):
@@ -77,6 +79,7 @@ def build_graph():
     builder.add_node("structured_github", nodes.structured_github)
     builder.add_node("structured_jira", nodes.structured_jira)
     builder.add_node("structured_slack", nodes.structured_slack)
+    builder.add_node("structured_recent", nodes.structured_recent)
     builder.add_node("retrieve", nodes.retrieve)
     builder.add_node("grade", nodes.grade)
     builder.add_node("correct", nodes.correct)
@@ -103,6 +106,7 @@ def build_graph():
             "structured_github": "structured_github",
             "structured_jira": "structured_jira",
             "structured_slack": "structured_slack",
+            "structured_recent": "structured_recent",
             "retrieve": "retrieve",
         },
     )
@@ -113,6 +117,7 @@ def build_graph():
     builder.add_edge("structured_github", "validate")
     builder.add_edge("structured_jira", "validate")
     builder.add_edge("structured_slack", "validate")
+    builder.add_edge("structured_recent", "validate")
 
     builder.add_edge("retrieve", "grade")
     builder.add_conditional_edges(
