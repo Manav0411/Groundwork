@@ -41,7 +41,9 @@ QUESTIONS = [
 ]
 
 
-async def run(base_url: str, api_key: str, project_id: str, trials: int) -> dict:
+async def run(
+    base_url: str, api_key: str, project_id: str, trials: int, delay: float = 0.0
+) -> dict:
     answers = []
     async with httpx.AsyncClient(base_url=base_url, timeout=httpx.Timeout(180)) as client:
         for question in QUESTIONS:
@@ -68,6 +70,11 @@ async def run(base_url: str, api_key: str, project_id: str, trials: int) -> dict
                     for gap in body["unresolved_gaps"]
                     if "does not state this claim" in gap
                 ]
+                if delay:
+                    # Paced so this can run against the deployed backend without disabling its rate
+                    # limiter. The limiter is production behaviour; turning it off to measure would
+                    # be measuring a configuration nobody runs.
+                    await asyncio.sleep(delay)
                 answers.append(
                     {
                         "question": question,
@@ -81,13 +88,21 @@ async def run(base_url: str, api_key: str, project_id: str, trials: int) -> dict
                 )
 
     checked = [a for a in answers if a["checked"]]
-    with_flag = [a for a in checked if a["flagged"]]
+    # An answer with no citations had no claim to judge, so including it measures how often the
+    # corpus refuses rather than how often the writer overreaches. Diluting a rate with cases that
+    # cannot contribute to it is the same defect the retrieval report carried for months, where
+    # negative cases scoring 0 by construction were averaged into recall.
+    judged = [a for a in checked if "No cited claim" not in a["summary"]]
+    with_flag = [a for a in judged if a["flagged"]]
     return {
         "answers": len(answers),
         "checked": len(checked),
+        "judged": len(judged),
+        "refusals": len(checked) - len(judged),
+        "not_checked": len(answers) - len(checked),
         "answers_with_a_flag": len(with_flag),
-        "flag_rate": len(with_flag) / len(checked) if checked else 0.0,
-        "graded_correct": sum(1 for a in checked if a["grade"] == "correct") ,
+        "flag_rate": len(with_flag) / len(judged) if judged else 0.0,
+        "graded_correct": sum(1 for a in checked if a["grade"] == "correct"),
         "results": answers,
     }
 
@@ -97,10 +112,12 @@ def render_markdown(summary: dict) -> str:
     lines = [
         "# Entailment on real answers",
         "",
-        f"- Answers checked: {summary['checked']} of {summary['answers']}",
-        f"- **Answers with at least one flagged claim: {summary['answers_with_a_flag']} "
-        f"({rate:.0%})**",
-        f"- Still graded `correct`: {summary['graded_correct']}",
+        f"- Answers: {summary['answers']} — {summary['judged']} with claims to judge, "
+        f"{summary['refusals']} refusals with none, "
+        f"{summary['not_checked']} unchecked (provider rate limit)",
+        f"- **Flagged, of the {summary['judged']} that had claims: "
+        f"{summary['answers_with_a_flag']} ({rate:.0%})**",
+        f"- Graded `correct`: {summary['graded_correct']}",
         "",
         "| Question | Trial | Grade | Cites | Entailment |",
         "|---|---:|---|---:|---|",
@@ -125,14 +142,20 @@ def render_markdown(summary: dict) -> str:
 async def main() -> int:
     parser = argparse.ArgumentParser(description="Measure entailment on real answers.")
     parser.add_argument("--base-url", default="http://localhost:8000")
+    # Defaults to the configured key so it never has to be typed. A key passed on the command
+    # line is visible in the process table to anyone with a shell on the host, and in shell
+    # history -- which is how APP_API_KEY ended up in a transcript on 2026-09-04.
     parser.add_argument("--api-key", default=settings.app_api_key)
     parser.add_argument("--project-id", default="groundwork")
     parser.add_argument("--trials", type=int, default=2)
+    parser.add_argument("--delay", type=float, default=0.0)
     parser.add_argument("--markdown-report")
     parser.add_argument("--json-report")
     args = parser.parse_args()
 
-    summary = await run(args.base_url, args.api_key, args.project_id, args.trials)
+    summary = await run(
+        args.base_url, args.api_key, args.project_id, args.trials, args.delay
+    )
     report = render_markdown(summary)
     print(report)
     if args.markdown_report:
