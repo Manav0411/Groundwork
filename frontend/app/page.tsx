@@ -31,7 +31,20 @@ export default function Home() {
         <Close />
         <footer className="flex flex-wrap justify-between gap-x-6 gap-y-2.5 border-t-2 border-ink pb-8 pt-4 font-mono text-[10.5px] font-semibold uppercase tracking-[0.12em] text-ink3">
           <span>Groundwork · self-hosted, read-only, free-first</span>
-          <span>Ollama + PostgreSQL + pgvector · no paid API required</span>
+          {/* The only outbound link on the page. Every other href goes to /app or an
+              anchor, so a reader persuaded by "every number here has a file you can
+              run" previously had no way to reach one. */}
+          <span>
+            Built by Manav Goel ·{" "}
+            <a
+              className="underline underline-offset-2 hover:text-ink"
+              href="https://github.com/Manav0411"
+              rel="noreferrer noopener"
+              target="_blank"
+            >
+              @Manav0411 ↗
+            </a>
+          </span>
         </footer>
       </div>
     </div>
