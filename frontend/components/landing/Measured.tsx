@@ -3,6 +3,13 @@ import { Section } from "./Section";
 /**
  * Percentages where a percentage is the honest unit. The test count stays a
  * count: "100% of tests passed" is meaningless when it is always 100.
+ *
+ * `src` is not rendered and is not the React key either. It records which
+ * harness produced each figure so whoever edits this file can go and re-run it,
+ * which is the section's whole claim — but the path on screen was detail the
+ * reader had no use for. Keying on it would have serialised every path into the
+ * server-component payload, so removing it from the markup alone would have
+ * left them all readable in view-source.
  */
 const MEASURES = [
   {
@@ -45,16 +52,13 @@ export function Measured() {
           {MEASURES.map((measure) => (
             <div
               className="grid items-baseline gap-x-[clamp(16px,3vw,40px)] gap-y-1.5 border-b border-rule py-4.5 sm:grid-cols-[11ch_minmax(0,1fr)]"
-              key={measure.src}
+              key={measure.value}
             >
               <span className="font-mono text-[clamp(21px,2.4vw,27px)] font-semibold tabular-nums tracking-[-0.02em]">
                 {measure.value}
               </span>
               <span className="max-w-[54ch] font-serif text-[15.5px] leading-normal text-ink2">
                 {measure.text}
-                <span className="break-identifier mt-1.5 block font-mono text-[10px] tracking-[0.05em] text-ink3">
-                  {measure.src}
-                </span>
               </span>
             </div>
           ))}
