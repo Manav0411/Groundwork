@@ -5,6 +5,7 @@ engineering projects from GitHub, Jira and Slack, and cites every claim.
 
 **Live demo → https://groundwork-mauve-two.vercel.app**
 
+![The landing page: a question, its three sources, and the answer assembled from them](assets/landing.jpg)
 
 It answers two different kinds of question by two different mechanisms, on purpose:
 
@@ -63,6 +64,11 @@ genuinely holds. Grading is long-prompt classification returning one bit, which 
 the small model wins.
 
 ## Answer integrity
+
+Every answer arrives with the route it took, the grade it earned, the sources it cites, and the
+per-node timings that add up to its latency — the screenshot below is one live turn, not a mock-up:
+
+![The workspace: a cited answer beside its evidence rail, over the trace of the eight nodes that produced it](assets/app.jpg)
 
 - **No evidence, no answer.** A question that retrieves nothing returns zero citations, a grade of
   `incorrect`, and an explicit gap — never a plausible-sounding guess.
