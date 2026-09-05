@@ -5,8 +5,6 @@ engineering projects from GitHub, Jira and Slack, and cites every claim.
 
 **Live demo → https://groundwork-mauve-two.vercel.app**
 
-> The demo backend runs on an EC2 instance that is stopped between sessions to keep it inside a free
-> tier. If questions fail, the box is asleep rather than broken.
 
 It answers two different kinds of question by two different mechanisms, on purpose:
 
