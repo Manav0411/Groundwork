@@ -41,12 +41,34 @@ QUESTIONS = [
 ]
 
 
+def select_questions(only: str | None) -> list[str]:
+    """The questions to ask, narrowed by substring.
+
+    Added because the full set at five trials outruns the provider's per-minute ceiling: the
+    entailment step degrades permissively, so the later questions come back with the check
+    skipped and a flag rate computed over whatever survived. A smaller set at a wider delay
+    measures the thing; the full set measures the rate limiter.
+    """
+    if not only:
+        return list(QUESTIONS)
+    wanted = [fragment.strip().lower() for fragment in only.split(",") if fragment.strip()]
+    chosen = [q for q in QUESTIONS if any(w in q.lower() for w in wanted)]
+    if not chosen:
+        raise SystemExit(f"--questions matched nothing in {len(QUESTIONS)} questions")
+    return chosen
+
+
 async def run(
-    base_url: str, api_key: str, project_id: str, trials: int, delay: float = 0.0
+    base_url: str,
+    api_key: str,
+    project_id: str,
+    trials: int,
+    delay: float = 0.0,
+    questions: list[str] | None = None,
 ) -> dict:
     answers = []
     async with httpx.AsyncClient(base_url=base_url, timeout=httpx.Timeout(180)) as client:
-        for question in QUESTIONS:
+        for question in questions or QUESTIONS:
             for trial in range(trials):
                 response = await client.post(
                     "/query",
@@ -151,10 +173,19 @@ async def main() -> int:
     parser.add_argument("--delay", type=float, default=0.0)
     parser.add_argument("--markdown-report")
     parser.add_argument("--json-report")
+    parser.add_argument(
+        "--questions",
+        help="Comma-separated substrings; only matching questions are asked.",
+    )
     args = parser.parse_args()
 
     summary = await run(
-        args.base_url, args.api_key, args.project_id, args.trials, args.delay
+        args.base_url,
+        args.api_key,
+        args.project_id,
+        args.trials,
+        args.delay,
+        select_questions(args.questions),
     )
     report = render_markdown(summary)
     print(report)
