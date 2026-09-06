@@ -20,7 +20,7 @@ const MEASURES = [
   {
     value: "80.7%",
     text: "Recall@8 across the three-source corpus, at MRR 0.941.",
-    src: "evals/baselines/retrieval.md"
+    src: "evals/baselines/retrieval_2026-08-24_slack.md"
   },
   {
     value: "95.0%",
@@ -28,9 +28,9 @@ const MEASURES = [
     src: "evals/baselines/grading.md"
   },
   {
-    value: "97.6%",
-    text: "Cut from a cited turn by moving generation off the instance — 67.9 s on cloud CPU down to 1.6 s, which is faster than the 8.1 s laptop it was built on. Measurement identified which part was slow.",
-    src: "evals/baselines/deployment_inference.md"
+    value: "97.3%",
+    text: "Cut from a cited turn by moving generation off the instance — 67.9 s on cloud CPU down to 1.8 s, which is faster than the 8.1 s laptop it was built on. Measurement identified which part was slow.",
+    src: "evals/baselines/landing_numbers_2026-09-06.md"
   },
   {
     value: "71.7%",
@@ -38,7 +38,7 @@ const MEASURES = [
     src: "evals/baselines/inference.md"
   },
   {
-    value: "364",
+    value: "404",
     text: "Tests across two tiers. The default opens no socket: the model, the database and the rate limiter are all forced offline, because a tier whose result depends on what the developer happens to be running is not a tier.",
     src: "backend/tests"
   }

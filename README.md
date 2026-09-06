@@ -11,15 +11,17 @@ It answers two different kinds of question by two different mechanisms, on purpo
 
 | Question | How | Latency |
 |---|---|---|
-| *"What was the last commit by Manav0411?"* | Typed SQL over normalized identities | **16 ms**, zero model calls |
-| *"What is the status of GW-3?"* | Typed SQL | 2 ms, zero model calls |
-| *"What was the last conversation on Slack?"* | Typed SQL over thread recency | 3 ms, zero model calls |
+| *"What was the last commit by Manav0411?"* | Typed SQL over normalized identities | **21 ms**, zero model calls |
+| *"What is the status of GW-3?"* | Typed SQL | 3 ms, zero model calls |
+| *"What was the last conversation on Slack?"* | Typed SQL over thread recency | 4 ms, zero model calls |
 | *"Are all the tasks complete?"* | SQL counting by status category | 4 ms, zero model calls |
-| *"Why did we choose the grader model?"* | Hybrid retrieval → grade → cited synthesis | ~1.6 s, 8 model calls |
+| *"What was the last feature added in this project?"* | Typed SQL over commit recency | 3 ms, zero model calls |
+| *"Why did we delete the synthetic demo evidence?"* | Hybrid retrieval → grade → cited synthesis | ~1.8 s, 3 model calls |
 
 Latencies are the sum of each run's own trace durations — the number the trace itself adds up to,
 so it can be checked — measured against the deployed backend with the index freshly synced, median
-of three warm runs. The first call after the instance wakes is an order of magnitude slower.
+of three warm runs. The first call after the instance wakes is an order of magnitude slower. Raw
+runs in `backend/evals/baselines/landing_numbers_2026-09-06.md`.
 
 Exact questions have exactly one right answer, decided by ordering or counting. Routing those
 through embedding similarity does not make the system more general, it makes it confidently wrong —
@@ -39,7 +41,7 @@ Every number here comes from a harness in `backend/evals/`, with the raw runs in
 |---|---:|
 | EC2 CPU, local chat model | 67.9 s |
 | Development laptop (M4, Metal) | 8.1 s |
-| **Deployed** (EC2 + hosted chat, embeddings local) | **1.6 s** |
+| **Deployed** (EC2 + hosted chat, embeddings local) | **1.8 s** |
 
 The deployment is faster than the machine it was built on. That follows only because the
 measurement identified *which* part was slow — generation, not embedding, and not the exact-answer
@@ -104,7 +106,7 @@ CRAG-style grading → bounded corrective loop → citation validation
 a cited answer, or an explicit unresolved gap
 ```
 
-The agent is a LangGraph `StateGraph`: 14 nodes, 17 edges, with one real cycle
+The agent is a LangGraph `StateGraph`: 15 nodes, 20 edges, with one real cycle
 (`grade → correct → grade`). Routing inside it is deterministic by design — the branches a model
 would choose between all converge on the same retrieval path, so a planner would add seconds of
 latency and non-reproducibility for no behavioural difference.

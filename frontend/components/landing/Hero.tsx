@@ -123,7 +123,7 @@ export function Hero() {
           >
             <div className="mb-2.5 flex flex-wrap justify-between gap-2.5 font-mono text-[9.5px] font-semibold uppercase tracking-[0.14em] text-ink3">
               <span>Groundwork answers</span>
-              <span>1.6 s · grade correct</span>
+              <span>1.8 s · grade correct</span>
             </div>
             <p className="m-0 font-serif text-[clamp(16px,1.6vw,19px)] leading-snug text-ink">
               The 3B grader was kept because the larger candidate dropped recall to 71.7%
@@ -138,8 +138,8 @@ export function Hero() {
 
       <dl className="mt-[clamp(34px,5vw,56px)] grid grid-cols-2 border-y-2 border-ink sm:grid-cols-4">
         {[
-          { label: "Exact path", value: "20–40 ms", note: "0 model calls" },
-          { label: "Cited path", value: "1.6 s", note: "up to 8 model calls" },
+          { label: "Exact path", value: "3–21 ms", note: "0 model calls" },
+          { label: "Cited path", value: "1.8 s", note: "up to 8 model calls" },
           { label: "Recall @ 8", value: "80.7%", note: "MRR 0.941" },
           { label: "New project", value: "100%", note: "8 of 8, suite unchanged" }
         ].map((stat, index) => (

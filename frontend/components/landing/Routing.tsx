@@ -10,17 +10,21 @@ import { Section } from "./Section";
  * recency question with typed SQL and an interpretive one with a model.
  *
  * Every figure below is the sum of that run's own trace durations, measured
- * against the deployed backend on 3 Sep 2026 with the index freshly synced —
- * the same number the trace strip adds up to, so a reader can check it. Median
- * of three warm runs; the first call after the instance wakes is an order of
- * magnitude slower and is not what these claim to represent.
+ * against the deployed backend on 6 Sep 2026 with all three connectors freshly
+ * synced — the same number the trace strip adds up to, so a reader can check
+ * it. Median of three warm runs; the first call after the instance wakes is an
+ * order of magnitude slower and is not what these claim to represent. Raw runs
+ * in backend/evals/baselines/landing_numbers_2026-09-06.md.
+ *
+ * The cited-path row is the same question §01 records, so the two sections can
+ * be checked against each other rather than against two different runs.
  */
 const ROUTES = [
   {
     dot: "bg-gh",
     question: "What was the last commit by Manav0411?",
     how: "Typed SQL over normalised identities",
-    time: "13 ms",
+    time: "21 ms",
     calls: "0 model calls"
   },
   {
@@ -34,22 +38,32 @@ const ROUTES = [
     dot: "bg-slack",
     question: "What was the last conversation on Slack?",
     how: "Typed SQL over thread recency",
-    time: "3 ms",
+    time: "4 ms",
     calls: "0 model calls"
   },
   {
     dot: "bg-jira",
     question: "Are all the tasks complete?",
     how: "SQL counting by status category",
-    time: "5 ms",
+    time: "4 ms",
+    calls: "0 model calls"
+  },
+  // The recency route exists because the cited path got this one wrong: asked for
+  // the last feature, it asserted a superlative no retrieved passage stated.
+  // Ordering is a property of the table, not of the embedding space.
+  {
+    dot: "bg-gh",
+    question: "What was the last feature added in this project?",
+    how: "Typed SQL over commit recency",
+    time: "3 ms",
     calls: "0 model calls"
   },
   {
     dot: "bg-slack",
-    question: "Why did we choose the grader model?",
+    question: "Why did we delete the synthetic demo evidence?",
     how: "Hybrid retrieval → grade → cited synthesis",
-    time: "1.6 s",
-    calls: "8 model calls",
+    time: "1.8 s",
+    calls: "3 model calls",
     rag: true
   }
 ];

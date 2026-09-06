@@ -11,99 +11,133 @@ import type { QueryResponse } from "@/lib/api";
  *
  * It is deliberately typed as `QueryResponse` rather than a looser shape: if
  * the API contract changes, this stops compiling, which is the only thing that
- * will remind anyone the fixture needs recapturing.
+ * will remind anyone the fixture needs recapturing. That guard catches a
+ * changed *shape*; it cannot catch a changed *pipeline*, which is how the
+ * previous capture went stale — it predated entailment checking and the node
+ * renaming, so §01 showed a trace the running system no longer produced.
+ * Recapture whenever a node is added, removed or renamed.
  *
  * Recapture with:
  *   curl -s -X POST "$API/query" -H 'Content-Type: application/json' \
  *     -H "X-API-Key: $KEY" \
  *     -d '{"project_id":"groundwork","query":"<question>"}' | jq
+ *
+ * Sync all three connectors first. An index older than its staleness threshold
+ * adds a caveat and downgrades the grade, which would be baked into the fixture.
  */
-export const RECORDED_QUESTION =
-  "Why did we keep the 3B model for grading instead of moving to something larger?";
+export const RECORDED_QUESTION = "Why did we delete the synthetic demo evidence?";
 
 /** When the run below was captured, for the label on the card. */
-export const RECORDED_AT = "30 Aug 2026";
+export const RECORDED_AT = "6 Sep 2026";
 
-export const RECORDED_ELAPSED_MS = 1572;
+/** Median of three warm runs measured on the instance, so it excludes the public chain. */
+export const RECORDED_ELAPSED_MS = 1828;
 
 export const RECORDED_RUN: QueryResponse = {
-  conversation_id: "recorded-2026-08-30",
+  conversation_id: "recorded-2026-09-06",
   answer: [
-    "Both larger candidates were measured and rejected. qwen3:4b scored worse on the same retrieval set — recall fell from 1.000 to 0.717, meaning it discarded evidence the corpus genuinely holds. [1]",
-    "Grading is long-prompt classification returning a single bit, which is the shape where a small model wins. Residency mattered too: a 3B grader beside an 8B writer plus embeddings exceeded 16 GB. [2]",
-    "The decision was carried into configuration rather than code, so the model is an environment variable and the finding is reproducible from the harness. [3]"
+    "The synthetic demo evidence was removed because it consisted of invented blockers and sprint‑plan documents that had been ingested as real evidence and returned to users with citations, creating a leak of fabricated information [1][3].",
+    "Deleting it also emptied the sample projects so they now follow the normal “no‑evidence” path, preventing the mechanism from unintentionally resurfacing fake data in future runs [1][3]."
   ].join("\n\n"),
   retrieval_grade: "correct",
-  tools_used: ["hybrid_rag"],
+  query_type: "weekly_project_brief",
+  tools_used: ["planner", "postgres_fts", "pgvector", "retrieval_grader"],
+  // Markers run 1 and 3, not 1 and 2: the writer cited two of the eight retrieved
+  // chunks and the validator dropped the rest. Renumbering them would be tidier
+  // and would misrepresent what the run did.
   citations: [
     {
       id: 1,
       source_type: "slack",
-      title: "#groundwork-eng",
-      url: null,
-      timestamp: "2026-08-26T11:42:00Z"
-    },
-    {
-      id: 2,
-      source_type: "slack",
-      title: "#groundwork-eng",
-      url: null,
-      timestamp: "2026-08-26T12:05:00Z"
+      title: "#all-groundwork — Why did we delete the synthetic demo evidence?",
+      url: "https://groundwork-0fg6997.slack.com/archives/C0BRTQ9BZ7H/p1787940734896229",
+      timestamp: "2026-08-28T18:12:45.116299+00:00"
     },
     {
       id: 3,
       source_type: "github",
-      title: "commit 4f1c9ab",
-      url: null,
-      timestamp: "2026-08-26T15:20:00Z"
+      title: "remove the last hardcoded answers and the demo-project default",
+      url: "https://github.com/Manav0411/Groundwork/commit/94010749eabab16dd8316d779b885ae8a9806b93",
+      timestamp: "2026-08-26T15:54:54+00:00"
     }
   ],
   evidence: [
     {
-      id: "slack-1",
+      id: "chunk-118",
       source_type: "slack",
-      title: "#groundwork-eng",
+      title: "#all-groundwork — Why did we delete the synthetic demo evidence?",
       snippet:
-        "“Re-ran the retrieval set on qwen3:4b. Recall@8 dropped to 0.717 from 1.000. It is dropping chunks that are actually relevant.”",
+        "Slack thread in #all-groundwork started by Manav Goel with 3 message(s). Manav Goel: Why did we delete the synthetic demo evidence? Manav Goel: It was invented blockers and sprint plans, ingested as real documents and returned to users with citations. Scoping it to the two sample projects contained the leak but kept the mechanism, so a later change could reopen it. Manav Goel: Deleted outright. The sample projects are empty shells now and take the ordinary no-evidence path: grade incorrect, zero",
       citation_id: 1,
-      authority: 0.9
+      authority: 0.8
     },
     {
-      id: "slack-2",
-      source_type: "slack",
-      title: "#groundwork-eng",
-      snippet:
-        "“Grading is classification with a long prompt and a one-bit answer. Small models are fine at that. The writer is where size pays.”",
-      citation_id: 2,
-      authority: 0.85
-    },
-    {
-      id: "gh-1",
+      id: "chunk-66",
       source_type: "github",
-      title: "commit 4f1c9ab",
-      snippet: "Move grader model to settings; record baseline in evals/baselines/inference.md",
+      title: "remove the last hardcoded answers and the demo-project default",
+      snippet:
+        "Git commit 94010749eabab16dd8316d779b885ae8a9806b93 by Manav0411. Commit message: remove the last hardcoded answers and the demo-project default The sample projects carried invented evidence: fixture blockers and sprint plans, ingested as real documents and returned with citations. Scoping them to project-atlas/project-orion contained the leak but kept the mechanism. They are empty projects now and take the ordinary no-evidence path. Also drops the canned weekly brief in llm.py, which carried [1",
       citation_id: 3,
       authority: 0.8
     }
   ],
   unresolved_gaps: [],
   trace: [
-    { name: "guardrail", status: "completed", duration_ms: 2, summary: "Question accepted" },
-    { name: "resolve", status: "completed", duration_ms: 1, summary: "Self-contained, no rewrite" },
-    { name: "plan", status: "completed", duration_ms: 1, summary: "Routed to hybrid retrieval" },
-    { name: "retrieve", status: "completed", duration_ms: 112, summary: "Lexical + vector, fused by RRF" },
-    { name: "grade", status: "completed", duration_ms: 228, summary: "Evidence judged insufficient" },
-    { name: "correct", status: "completed", duration_ms: 96, summary: "Query rewritten, retrieved again" },
-    { name: "grade", status: "completed", duration_ms: 211, summary: "Evidence judged sufficient" },
-    { name: "settle_evidence", status: "completed", duration_ms: 24, summary: "3 citations settled" },
-    { name: "synthesize", status: "completed", duration_ms: 852, summary: "Answer written with markers" },
-    { name: "validate", status: "completed", duration_ms: 44, summary: "3 of 3 markers resolved" }
+    {
+      name: "Input Guardrail",
+      status: "completed",
+      duration_ms: 0,
+      summary: "Input reads as a question; admitted to the pipeline."
+    },
+    {
+      name: "Follow-up Resolution",
+      status: "completed",
+      duration_ms: 0,
+      summary: "First turn in the conversation; nothing to resolve against."
+    },
+    {
+      name: "Planner",
+      status: "completed",
+      duration_ms: 0,
+      summary: "Classified as weekly_project_brief; selected hybrid full-text/vector retrieval."
+    },
+    {
+      name: "Hybrid Retriever",
+      status: "completed",
+      duration_ms: 92,
+      summary: "Retrieved 8 persisted chunk(s) with hybrid full-text/vector search."
+    },
+    {
+      name: "Retrieval Grader",
+      status: "completed",
+      duration_ms: 557,
+      summary: "Graded 8 retrieved chunk(s) sufficient; supporting passage: 'Deleted outright.'."
+    },
+    {
+      name: "Answer Generator",
+      status: "completed",
+      duration_ms: 548,
+      summary: "Generated answer with openai_compat model openai/gpt-oss-120b."
+    },
+    {
+      name: "Entailment Check",
+      status: "completed",
+      duration_ms: 597,
+      summary: "Checked 2 claim(s) against cited evidence; all supported."
+    },
+    {
+      name: "Citation Validator",
+      status: "completed",
+      duration_ms: 0,
+      summary:
+        "Validated 2 citation marker(s) against emitted evidence. Dropped 6 retrieved citation(s) the answer did not reference."
+    }
   ],
   resolved_query: null
 };
 
 /**
- * A captured refusal, from the live backend on 3 Sep 2026, immediately after a
+ * A captured refusal, from the live backend on 6 Sep 2026, immediately after a
  * successful sync of all three connectors.
  *
  * This is the state the product is proudest of and the one a screenshot never
@@ -119,18 +153,17 @@ export const RECORDED_RUN: QueryResponse = {
  * any of the three connectors and never will be, so this refuses for want of
  * evidence rather than for want of a route. That is the policy §05 claims.
  *
- * Recaptured after the refusal text stopped naming connectors — it used to say
- * "sync your GitHub or Jira sources", which predated Slack and told people to
- * sync two of the three they had. The trace also now opens with the guardrail
- * admitting the question, which the previous capture predated.
+ * Note the entailment step still runs and reports honestly that there was
+ * nothing to check: a refusal makes no claim, so there is no claim to verify.
  */
 export const REFUSAL_QUESTION = "What did we decide about pricing?";
 
 export const RECORDED_REFUSAL: QueryResponse = {
-  conversation_id: "recorded-refusal-2026-09-03b",
+  conversation_id: "recorded-refusal-2026-09-06",
   answer:
     "I could not find any indexed evidence for this question in groundwork. Sync the project's connected sources, or rephrase the question, and ask again.",
   retrieval_grade: "incorrect",
+  query_type: "weekly_project_brief",
   tools_used: ["planner", "postgres_fts", "pgvector", "retrieval_grader", "corrective_retrieval"],
   citations: [],
   evidence: [],
@@ -159,42 +192,47 @@ export const RECORDED_REFUSAL: QueryResponse = {
     {
       name: "Hybrid Retriever",
       status: "completed",
-      duration_ms: 1394,
+      duration_ms: 87,
       summary: "Retrieved 8 persisted chunk(s) with hybrid full-text/vector search."
     },
     {
       name: "Retrieval Grader",
       status: "completed",
-      duration_ms: 324,
+      duration_ms: 469,
       summary:
         "Graded the 8 retrieved chunk(s) insufficient: no passage states What did we decide about pricing?."
     },
     {
       name: "Corrective Retrieval 1",
       status: "completed",
-      duration_ms: 471,
+      duration_ms: 561,
       summary:
         "Attempt 1: rewrote the question as 'What decision was made regarding pricing?'. Re-retrieved 8 chunk(s)."
     },
     {
       name: "Retrieval Grader",
       status: "completed",
-      duration_ms: 595,
-      summary:
-        "Graded the 8 retrieved chunk(s) insufficient: no passage states What did we decide about pricing?."
+      duration_ms: 473,
+      summary: "Graded the 8 retrieved chunk(s) insufficient: no passage states pricing decision."
     },
     {
       name: "Corrective Retrieval 2",
       status: "completed",
-      duration_ms: 82,
+      duration_ms: 87,
       summary: "Attempt 2: widened the candidate pool. Re-retrieved 16 chunk(s)."
     },
     {
       name: "Retrieval Grader",
       status: "completed",
-      duration_ms: 582,
+      duration_ms: 548,
       summary:
-        "Graded the 16 retrieved chunk(s) insufficient: no passage states the decision about pricing."
+        "Graded the 16 retrieved chunk(s) insufficient: no passage states What did we decide about pricing?."
+    },
+    {
+      name: "Entailment Check",
+      status: "completed",
+      duration_ms: 0,
+      summary: "No cited claim to check."
     },
     {
       name: "Citation Validator",

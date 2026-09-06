@@ -27,7 +27,7 @@ const STAGES = [
     title: "Grade the evidence before writing a word",
     body: "A grader decides whether what came back is sufficient, and a bounded corrective loop retries when it is not. Every marker is checked against the sources actually emitted; one that does not resolve is stripped and the grade downgraded.",
     data: [
-      ["graph", "14 nodes · 17 edges"],
+      ["graph", "15 nodes · 20 edges"],
       ["cycles", "1"],
       ["unresolved", "stripped"]
     ]

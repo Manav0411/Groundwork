@@ -24,8 +24,8 @@ export function WatchItWork() {
       label="Watch it work"
       lede={
         <>
-          The trace is the pipeline reporting node by node: ten of fourteen entered, one corrective
-          cycle, every duration <b className="font-medium text-ink">measured rather than estimated</b>.
+          The trace is the pipeline reporting node by node: eight of fifteen entered, the grader
+          satisfied on the first pass, every duration <b className="font-medium text-ink">measured rather than estimated</b>.
         </>
       }
       mark="§01"
