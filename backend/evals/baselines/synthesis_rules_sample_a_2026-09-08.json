@@ -1,0 +1,66 @@
+{
+  "answers": 6,
+  "checked": 6,
+  "judged": 6,
+  "refusals": 0,
+  "not_checked": 0,
+  "answers_with_a_flag": 0,
+  "flag_rate": 0.0,
+  "graded_correct": 6,
+  "results": [
+    {
+      "question": "Why did we choose the grader model?",
+      "trial": 1,
+      "grade": "correct",
+      "citations": 2,
+      "summary": "Checked 1 claim(s) against cited evidence; all supported.",
+      "flagged": [],
+      "checked": true
+    },
+    {
+      "question": "Why did we choose the grader model?",
+      "trial": 2,
+      "grade": "correct",
+      "citations": 2,
+      "summary": "Checked 1 claim(s) against cited evidence; all supported.",
+      "flagged": [],
+      "checked": true
+    },
+    {
+      "question": "Why did we choose the grader model?",
+      "trial": 3,
+      "grade": "correct",
+      "citations": 2,
+      "summary": "Checked 1 claim(s) against cited evidence; all supported.",
+      "flagged": [],
+      "checked": true
+    },
+    {
+      "question": "Who is working on this project?",
+      "trial": 1,
+      "grade": "correct",
+      "citations": 2,
+      "summary": "Checked 1 claim(s) against cited evidence; all supported.",
+      "flagged": [],
+      "checked": true
+    },
+    {
+      "question": "Who is working on this project?",
+      "trial": 2,
+      "grade": "correct",
+      "citations": 2,
+      "summary": "Checked 1 claim(s) against cited evidence; all supported.",
+      "flagged": [],
+      "checked": true
+    },
+    {
+      "question": "Who is working on this project?",
+      "trial": 3,
+      "grade": "correct",
+      "citations": 2,
+      "summary": "Checked 1 claim(s) against cited evidence; all supported.",
+      "flagged": [],
+      "checked": true
+    }
+  ]
+}

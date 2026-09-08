@@ -1,0 +1,108 @@
+{
+  "answers": 6,
+  "checked": 6,
+  "judged": 6,
+  "refusals": 0,
+  "not_checked": 0,
+  "answers_with_a_flag": 4,
+  "flag_rate": 0.6666666666666666,
+  "graded_correct": 2,
+  "results": [
+    {
+      "question": "Why did we choose the grader model?",
+      "trial": 1,
+      "grade": "ambiguous",
+      "citations": 3,
+      "summary": "2 of 2 claim(s) are not stated by the evidence they cite ([1][5], [2]); downgraded the retrieval grade.",
+      "flagged": [
+        {
+          "claim": "The evidence cited as [1] [5] does not state this claim: \u201cThe grader model was chosen because recall was the decisive metric: the 4\u2011billion\u2011parameter candidate rejected four questions that the corpus actually answered,\u201d",
+          "evidence": {
+            "1": "Slack thread in #all-groundwork started by Manav Goel with 3 message(s). Manav Goel: Should the grader use a bigger model? Manav Goel: Tested both. qwen3:8b scores 0.900 sufficiency accuracy against llama3.2:3b at 0.950, and takes 15s per call against 3.4s. qwen3:4b is worse still: accuracy 0.800 and recall drops from 1.000 to 0.717. Manav Goel: Recall is what decides it. The 4b model rejects four questions the corpus genuinely answers. A grader that keeps junk gets caught by citation validation",
+            "2": "els originally chosen were retired by Groq mid-plan, which is why model ids are configuration. Roles use different models: locally that was impossible because one model had to serve both on 16GB, and hosted it is required because rate limits count per model. Measured on the same 20 grading cases: gpt-oss-20b scores 0.950 with 3/3 refusals at 234ms, against llama3.2:3b at 0.950, 2 of 3, and 3270ms. The first attempt graded only 8 of 20 and silently degraded the rest, so the client now retries onc",
+            "5": "Git commit 5e7d922bbbfd0d4504507fa6379c141c6749371a by Manav0411. Commit message: measure Qwen3-4B as a grader and reject it At 2.5GB it was the obvious candidate for a memory-constrained deployment box. Measured on the same 20 cases it is the worst of the three: accuracy 0.800 against 0.950, and recall 1.000 -> 0.717. Recall is what decides it. It rejects four questions the corpus genuinely answers, each with \"no passage states...\". A grader that keeps junk is caught by citation validation; a g"
+          }
+        },
+        {
+          "claim": "The evidence cited as [2] does not state this claim: \u201cMeasurements on the same 20 grading cases showed that the selected model achieved 0.950 accuracy with consistent grading of all cases, whereas the initial attem\u201d",
+          "evidence": {
+            "1": "Slack thread in #all-groundwork started by Manav Goel with 3 message(s). Manav Goel: Should the grader use a bigger model? Manav Goel: Tested both. qwen3:8b scores 0.900 sufficiency accuracy against llama3.2:3b at 0.950, and takes 15s per call against 3.4s. qwen3:4b is worse still: accuracy 0.800 and recall drops from 1.000 to 0.717. Manav Goel: Recall is what decides it. The 4b model rejects four questions the corpus genuinely answers. A grader that keeps junk gets caught by citation validation",
+            "2": "els originally chosen were retired by Groq mid-plan, which is why model ids are configuration. Roles use different models: locally that was impossible because one model had to serve both on 16GB, and hosted it is required because rate limits count per model. Measured on the same 20 grading cases: gpt-oss-20b scores 0.950 with 3/3 refusals at 234ms, against llama3.2:3b at 0.950, 2 of 3, and 3270ms. The first attempt graded only 8 of 20 and silently degraded the rest, so the client now retries onc",
+            "5": "Git commit 5e7d922bbbfd0d4504507fa6379c141c6749371a by Manav0411. Commit message: measure Qwen3-4B as a grader and reject it At 2.5GB it was the obvious candidate for a memory-constrained deployment box. Measured on the same 20 cases it is the worst of the three: accuracy 0.800 against 0.950, and recall 1.000 -> 0.717. Recall is what decides it. It rejects four questions the corpus genuinely answers, each with \"no passage states...\". A grader that keeps junk is caught by citation validation; a g"
+          }
+        }
+      ],
+      "checked": true
+    },
+    {
+      "question": "Why did we choose the grader model?",
+      "trial": 2,
+      "grade": "ambiguous",
+      "citations": 3,
+      "summary": "1 of 2 claim(s) are not stated by the evidence they cite ([2]); downgraded the retrieval grade.",
+      "flagged": [
+        {
+          "claim": "The evidence cited as [2] does not state this claim: \u201cMeasurements on the same 20 grading cases showed that the selected model achieved 0.950 accuracy with acceptable refusal rates, whereas the first attempt with a\u201d",
+          "evidence": {
+            "1": "Slack thread in #all-groundwork started by Manav Goel with 3 message(s). Manav Goel: Should the grader use a bigger model? Manav Goel: Tested both. qwen3:8b scores 0.900 sufficiency accuracy against llama3.2:3b at 0.950, and takes 15s per call against 3.4s. qwen3:4b is worse still: accuracy 0.800 and recall drops from 1.000 to 0.717. Manav Goel: Recall is what decides it. The 4b model rejects four questions the corpus genuinely answers. A grader that keeps junk gets caught by citation validation",
+            "2": "els originally chosen were retired by Groq mid-plan, which is why model ids are configuration. Roles use different models: locally that was impossible because one model had to serve both on 16GB, and hosted it is required because rate limits count per model. Measured on the same 20 grading cases: gpt-oss-20b scores 0.950 with 3/3 refusals at 234ms, against llama3.2:3b at 0.950, 2 of 3, and 3270ms. The first attempt graded only 8 of 20 and silently degraded the rest, so the client now retries onc",
+            "5": "Git commit 5e7d922bbbfd0d4504507fa6379c141c6749371a by Manav0411. Commit message: measure Qwen3-4B as a grader and reject it At 2.5GB it was the obvious candidate for a memory-constrained deployment box. Measured on the same 20 cases it is the worst of the three: accuracy 0.800 against 0.950, and recall 1.000 -> 0.717. Recall is what decides it. It rejects four questions the corpus genuinely answers, each with \"no passage states...\". A grader that keeps junk is caught by citation validation; a g"
+          }
+        }
+      ],
+      "checked": true
+    },
+    {
+      "question": "Why did we choose the grader model?",
+      "trial": 3,
+      "grade": "ambiguous",
+      "citations": 2,
+      "summary": "1 of 3 claim(s) are not stated by the evidence they cite ([1]); downgraded the retrieval grade.",
+      "flagged": [
+        {
+          "claim": "The evidence cited as [1] does not state this claim: \u201cSince a grader that keeps junk is caught by citation validation, the model with higher recall and accuracy was preferred\u201d",
+          "evidence": {
+            "1": "Slack thread in #all-groundwork started by Manav Goel with 3 message(s). Manav Goel: Should the grader use a bigger model? Manav Goel: Tested both. qwen3:8b scores 0.900 sufficiency accuracy against llama3.2:3b at 0.950, and takes 15s per call against 3.4s. qwen3:4b is worse still: accuracy 0.800 and recall drops from 1.000 to 0.717. Manav Goel: Recall is what decides it. The 4b model rejects four questions the corpus genuinely answers. A grader that keeps junk gets caught by citation validation",
+            "5": "Git commit 5e7d922bbbfd0d4504507fa6379c141c6749371a by Manav0411. Commit message: measure Qwen3-4B as a grader and reject it At 2.5GB it was the obvious candidate for a memory-constrained deployment box. Measured on the same 20 cases it is the worst of the three: accuracy 0.800 against 0.950, and recall 1.000 -> 0.717. Recall is what decides it. It rejects four questions the corpus genuinely answers, each with \"no passage states...\". A grader that keeps junk is caught by citation validation; a g"
+          }
+        }
+      ],
+      "checked": true
+    },
+    {
+      "question": "Who is working on this project?",
+      "trial": 1,
+      "grade": "correct",
+      "citations": 2,
+      "summary": "Checked 1 claim(s) against cited evidence; all supported.",
+      "flagged": [],
+      "checked": true
+    },
+    {
+      "question": "Who is working on this project?",
+      "trial": 2,
+      "grade": "ambiguous",
+      "citations": 2,
+      "summary": "1 of 1 claim(s) are not stated by the evidence they cite ([1][5]); downgraded the retrieval grade.",
+      "flagged": [
+        {
+          "claim": "The evidence cited as [1] [5] does not state this claim: \u201cManav\u202fGoel is the person working on the project, as shown by the Jira issue assignments and the commit author information\u201d",
+          "evidence": {
+            "1": "Jira issue GW-9: Test author identity against a multi-contributor repo. Type: Epic. Status: In Progress. Priority: Medium. Assignee: Manav Goel. Labels: None. Description: Both indexed projects have a single contributor, so identity normalization has never been put under real pressure. It does already handle one genuine case: GitHub reports the same person as Manav0411 on 31 commits and Manav Goel on 5, and author_identities unifies them into one identity with 36. A repository with several disti",
+            "5": "Jira issue GW-13: Prove generalization on an unseen project. Type: Epic. Status: Done. Priority: High. Assignee: Manav Goel. Labels: None. Description: Every eval dataset hardcoded its expectations against one corpus. That guards known behaviour and cannot demonstrate that the system works on a project nobody wrote cases for. A dataset whose answers were typed by hand from the data it tests proves nothing about generalization.."
+          }
+        }
+      ],
+      "checked": true
+    },
+    {
+      "question": "Who is working on this project?",
+      "trial": 3,
+      "grade": "correct",
+      "citations": 2,
+      "summary": "Checked 1 claim(s) against cited evidence; all supported.",
+      "flagged": [],
+      "checked": true
+    }
+  ]
+}
