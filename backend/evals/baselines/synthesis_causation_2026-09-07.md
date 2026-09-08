@@ -1,4 +1,12 @@
-# Tightening the synthesis prompt — measured, confounded, reverted
+# Tightening the synthesis prompt: measured, confounded, reverted
+
+> **Corrected on 2026-09-08.** The confound described below is not real. The six "grader refusals"
+> that appeared only in the after-run were present in the before-run too, which the persisted
+> `query_runs` rows show plainly. I misread the runner's `checked` field, which is true for a
+> refusal as well as for an answer. The two passes are comparable, and the corrected comparison
+> is in `grader_stability_2026-09-08.md`: flags fell 3 to 1, but three of six answers lost their
+> citations entirely, which is why the revert was still right. The grader was also measured and
+> is deterministic: 30 replays, zero flips.
 
 Two grounding rules were added to `build_answer_prompt` on 2026-09-07 and reverted the same hour.
 The measurement did not show they were wrong. It showed it could not tell, which is a different

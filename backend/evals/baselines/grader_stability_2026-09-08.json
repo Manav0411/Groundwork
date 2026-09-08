@@ -1,0 +1,288 @@
+{
+  "project_id": "groundwork",
+  "replays": 10,
+  "questions": [
+    {
+      "question": "How does retrieval work?",
+      "chunks": 8,
+      "retrieval_stable": true,
+      "retrieved_ids": [
+        98,
+        754,
+        154,
+        714,
+        112,
+        90,
+        724,
+        120
+      ],
+      "grades": {
+        "incorrect": 10
+      },
+      "answerable": {
+        "False": 10
+      },
+      "flipped": false,
+      "verdicts": [
+        {
+          "grade": "incorrect",
+          "answerable": false,
+          "needed": "How does retrieval work?",
+          "evidence": "NONE",
+          "summary": "Graded the 8 retrieved chunk(s) insufficient: no passage states How does retrieval work?."
+        },
+        {
+          "grade": "incorrect",
+          "answerable": false,
+          "needed": "How does retrieval work?",
+          "evidence": "NONE",
+          "summary": "Graded the 8 retrieved chunk(s) insufficient: no passage states How does retrieval work?."
+        },
+        {
+          "grade": "incorrect",
+          "answerable": false,
+          "needed": "How does retrieval work?",
+          "evidence": "NONE",
+          "summary": "Graded the 8 retrieved chunk(s) insufficient: no passage states How does retrieval work?."
+        },
+        {
+          "grade": "incorrect",
+          "answerable": false,
+          "needed": "How does retrieval work?",
+          "evidence": "NONE",
+          "summary": "Graded the 8 retrieved chunk(s) insufficient: no passage states How does retrieval work?."
+        },
+        {
+          "grade": "incorrect",
+          "answerable": false,
+          "needed": "How does retrieval work?",
+          "evidence": "NONE",
+          "summary": "Graded the 8 retrieved chunk(s) insufficient: no passage states How does retrieval work?."
+        },
+        {
+          "grade": "incorrect",
+          "answerable": false,
+          "needed": "How does retrieval work?",
+          "evidence": "NONE",
+          "summary": "Graded the 8 retrieved chunk(s) insufficient: no passage states How does retrieval work?."
+        },
+        {
+          "grade": "incorrect",
+          "answerable": false,
+          "needed": "How does retrieval work?",
+          "evidence": "NONE",
+          "summary": "Graded the 8 retrieved chunk(s) insufficient: no passage states How does retrieval work?."
+        },
+        {
+          "grade": "incorrect",
+          "answerable": false,
+          "needed": "How does retrieval work?",
+          "evidence": "NONE",
+          "summary": "Graded the 8 retrieved chunk(s) insufficient: no passage states How does retrieval work?."
+        },
+        {
+          "grade": "incorrect",
+          "answerable": false,
+          "needed": "How does retrieval work?",
+          "evidence": "NONE",
+          "summary": "Graded the 8 retrieved chunk(s) insufficient: no passage states How does retrieval work?."
+        },
+        {
+          "grade": "incorrect",
+          "answerable": false,
+          "needed": "How does retrieval work?",
+          "evidence": "NONE",
+          "summary": "Graded the 8 retrieved chunk(s) insufficient: no passage states How does retrieval work?."
+        }
+      ]
+    },
+    {
+      "question": "Why is the backend deployed on EC2?",
+      "chunks": 8,
+      "retrieval_stable": true,
+      "retrieved_ids": [
+        135,
+        119,
+        152,
+        53,
+        706,
+        123,
+        134,
+        130
+      ],
+      "grades": {
+        "incorrect": 10
+      },
+      "answerable": {
+        "False": 10
+      },
+      "flipped": false,
+      "verdicts": [
+        {
+          "grade": "incorrect",
+          "answerable": false,
+          "needed": "Why is the backend deployed on EC2?",
+          "evidence": "NONE",
+          "summary": "Graded the 8 retrieved chunk(s) insufficient: no passage states Why is the backend deployed on EC2?."
+        },
+        {
+          "grade": "incorrect",
+          "answerable": false,
+          "needed": "Why is the backend deployed on EC2?",
+          "evidence": "NONE",
+          "summary": "Graded the 8 retrieved chunk(s) insufficient: no passage states Why is the backend deployed on EC2?."
+        },
+        {
+          "grade": "incorrect",
+          "answerable": false,
+          "needed": "Why is the backend deployed on EC2?",
+          "evidence": "NONE",
+          "summary": "Graded the 8 retrieved chunk(s) insufficient: no passage states Why is the backend deployed on EC2?."
+        },
+        {
+          "grade": "incorrect",
+          "answerable": false,
+          "needed": "Why is the backend deployed on EC2?",
+          "evidence": "NONE",
+          "summary": "Graded the 8 retrieved chunk(s) insufficient: no passage states Why is the backend deployed on EC2?."
+        },
+        {
+          "grade": "incorrect",
+          "answerable": false,
+          "needed": "Why is the backend deployed on EC2?",
+          "evidence": "NONE",
+          "summary": "Graded the 8 retrieved chunk(s) insufficient: no passage states Why is the backend deployed on EC2?."
+        },
+        {
+          "grade": "incorrect",
+          "answerable": false,
+          "needed": "Why is the backend deployed on EC2?",
+          "evidence": "NONE",
+          "summary": "Graded the 8 retrieved chunk(s) insufficient: no passage states Why is the backend deployed on EC2?."
+        },
+        {
+          "grade": "incorrect",
+          "answerable": false,
+          "needed": "Why is the backend deployed on EC2?",
+          "evidence": "NONE",
+          "summary": "Graded the 8 retrieved chunk(s) insufficient: no passage states Why is the backend deployed on EC2?."
+        },
+        {
+          "grade": "incorrect",
+          "answerable": false,
+          "needed": "Why is the backend deployed on EC2?",
+          "evidence": "NONE",
+          "summary": "Graded the 8 retrieved chunk(s) insufficient: no passage states Why is the backend deployed on EC2?."
+        },
+        {
+          "grade": "incorrect",
+          "answerable": false,
+          "needed": "Why is the backend deployed on EC2?",
+          "evidence": "NONE",
+          "summary": "Graded the 8 retrieved chunk(s) insufficient: no passage states Why is the backend deployed on EC2?."
+        },
+        {
+          "grade": "incorrect",
+          "answerable": false,
+          "needed": "Why is the backend deployed on EC2?",
+          "evidence": "NONE",
+          "summary": "Graded the 8 retrieved chunk(s) insufficient: no passage states Why is the backend deployed on EC2?."
+        }
+      ]
+    },
+    {
+      "question": "Why did we delete the synthetic demo evidence?",
+      "chunks": 8,
+      "retrieval_stable": true,
+      "retrieved_ids": [
+        118,
+        147,
+        66,
+        93,
+        691,
+        756,
+        724,
+        762
+      ],
+      "grades": {
+        "correct": 10
+      },
+      "answerable": {
+        "True": 10
+      },
+      "flipped": false,
+      "verdicts": [
+        {
+          "grade": "correct",
+          "answerable": true,
+          "needed": "The synthetic demo evidence was deleted because it contained invented blockers and sprint plans that leaked.",
+          "evidence": "Deleted outright.",
+          "summary": "Graded 8 retrieved chunk(s) sufficient; supporting passage: 'Deleted outright.'."
+        },
+        {
+          "grade": "correct",
+          "answerable": true,
+          "needed": "The synthetic demo evidence was deleted because it contained invented blockers and sprint plans that leaked.",
+          "evidence": "Deleted outright.",
+          "summary": "Graded 8 retrieved chunk(s) sufficient; supporting passage: 'Deleted outright.'."
+        },
+        {
+          "grade": "correct",
+          "answerable": true,
+          "needed": "The synthetic demo evidence was deleted because it contained invented blockers and sprint plans that leaked.",
+          "evidence": "Deleted outright.",
+          "summary": "Graded 8 retrieved chunk(s) sufficient; supporting passage: 'Deleted outright.'."
+        },
+        {
+          "grade": "correct",
+          "answerable": true,
+          "needed": "The synthetic demo evidence was deleted because it contained invented blockers and sprint plans that leaked.",
+          "evidence": "Deleted outright.",
+          "summary": "Graded 8 retrieved chunk(s) sufficient; supporting passage: 'Deleted outright.'."
+        },
+        {
+          "grade": "correct",
+          "answerable": true,
+          "needed": "The synthetic demo evidence was deleted because it contained invented blockers and sprint plans that leaked.",
+          "evidence": "Deleted outright.",
+          "summary": "Graded 8 retrieved chunk(s) sufficient; supporting passage: 'Deleted outright.'."
+        },
+        {
+          "grade": "correct",
+          "answerable": true,
+          "needed": "The synthetic demo evidence was deleted because it contained invented blockers and sprint plans that leaked.",
+          "evidence": "Deleted outright.",
+          "summary": "Graded 8 retrieved chunk(s) sufficient; supporting passage: 'Deleted outright.'."
+        },
+        {
+          "grade": "correct",
+          "answerable": true,
+          "needed": "The synthetic demo evidence was deleted because it contained invented blockers and sprint plans that leaked.",
+          "evidence": "Deleted outright.",
+          "summary": "Graded 8 retrieved chunk(s) sufficient; supporting passage: 'Deleted outright.'."
+        },
+        {
+          "grade": "correct",
+          "answerable": true,
+          "needed": "The synthetic demo evidence was deleted because it contained invented blockers and sprint plans that leaked into user an",
+          "evidence": "Deleted outright.",
+          "summary": "Graded 8 retrieved chunk(s) sufficient; supporting passage: 'Deleted outright.'."
+        },
+        {
+          "grade": "correct",
+          "answerable": true,
+          "needed": "The synthetic demo evidence was deleted because it contained invented blockers and sprint plans that leaked.",
+          "evidence": "Deleted outright.",
+          "summary": "Graded 8 retrieved chunk(s) sufficient; supporting passage: 'Deleted outright.'."
+        },
+        {
+          "grade": "correct",
+          "answerable": true,
+          "needed": "The synthetic demo evidence was deleted because it contained invented blockers and sprint plans that leaked.",
+          "evidence": "Deleted outright.",
+          "summary": "Graded 8 retrieved chunk(s) sufficient; supporting passage: 'Deleted outright.'."
+        }
+      ]
+    }
+  ]
+}
