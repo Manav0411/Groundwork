@@ -276,8 +276,11 @@ between them.
     POST /projects/{id}/sync/{github,jira,slack}   ?background=true
     GET  /projects/{id}/sync/{github,jira,slack}
     GET  /conversations/{id}                       GET /conversations/{id}/trace
+    POST /webhooks/github                          HMAC-signed, no API key
 
-All non-health endpoints require `X-API-Key`.
+All non-health endpoints require `X-API-Key`, except `POST /webhooks/github`: GitHub cannot send
+that header, so an HMAC-SHA256 signature over the raw body is the whole gate. Unset the secret and
+the endpoint returns 503 rather than accepting unauthenticated deliveries.
 
 `POST /query` accepts an optional `conversation_id`. A follow-up that depends on earlier turns —
 *"who is it assigned to?"* — is rewritten into a standalone question **before** routing, so it reaches
