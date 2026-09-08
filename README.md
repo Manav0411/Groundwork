@@ -97,7 +97,7 @@ Next.js UI (Vercel)
 FastAPI backend (EC2, behind Caddy + Let's Encrypt)
   ↓
 deterministic intent router — ordered by specificity, no LLM
-  ├── GitHub / Jira / Slack connectors        incremental, overlap-cursor polling
+  ├── GitHub / Jira / Slack connectors        polling; GitHub also ingests push webhooks
   ├── typed SQL for exact questions           structured_github.py, structured_jira.py
   └── hybrid retrieval                        Postgres full-text + pgvector, fused by RRF
   ↓
@@ -293,12 +293,13 @@ unchanged content keeps its chunks and its embeddings.
 
 Kept deliberately, with reasons, rather than quietly omitted:
 
-- **Polling, not webhooks.** No public ingress and no secret rotation to manage. The cost is real: a
-  freshly pushed commit with an unusually old author timestamp can fall outside the overlap window.
+- **Webhooks for GitHub only.** A push is ingested by sha the moment it arrives, which closes the
+  blind spot polling has: GitHub's `since` filters on author date, so a rebased or backdated commit
+  never appears in a poll at all. Jira and Slack still poll, and polling remains the reconciliation
+  path for GitHub too, because a delivery sent while the instance is stopped is not retried.
 - **Entailment is judged per claim span, not per sentence** — see Answer integrity above.
 - **One unanswerable question is accepted** by the grader, because the corpus grew Slack timing
   metrics that superficially resemble the figure asked for.
-- **Author identity is untested against a repository with many distinct contributors.**
 - **Multi-intent questions are not supported**, and are declined rather than planned: citation
   ordinals would have to be renumbered across two evidence sets, which is one of the two load-bearing
   invariants.

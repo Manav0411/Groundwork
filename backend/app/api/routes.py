@@ -1,9 +1,10 @@
 import asyncio
+import json
 from dataclasses import asdict
 from typing import Annotated
 
 import httpx
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Response
+from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException, Request, Response
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -11,8 +12,9 @@ from app.agent.graph import run_agent
 from app.connectors.github import GitHubRateLimitError
 from app.connectors.jira import JiraRateLimitError
 from app.connectors.slack import SlackAPIError, SlackRateLimitError
+from app.core.config import settings
 from app.core.observability import SYNCS, logger, render_metrics
-from app.core.security import require_api_key
+from app.core.security import require_api_key, verify_github_signature
 from app.db.models import ConnectorSyncState, Project, SourceDocument
 from app.db.session import SessionFactory, get_optional_session, get_session
 from app.models.schemas import (
@@ -25,6 +27,7 @@ from app.models.schemas import (
     TimelineItem,
 )
 from app.services.github_sync import GitHubSyncInProgressError, sync_github_project
+from app.services.github_webhook import commit_shas, handle_push, project_for_repo
 from app.services.ingestion import seed_synthetic_workspace
 from app.services.jira_sync import JiraSyncInProgressError, sync_jira_project
 from app.services.llm import chat_client, embedding_client
@@ -201,6 +204,66 @@ async def _start_background_sync(
 async def ingest_workspace(session: DatabaseSession) -> dict[str, object]:
     stats = await seed_synthetic_workspace(session)
     return {"status": "loaded", **stats}
+
+
+@router.post("/webhooks/github", status_code=202)
+async def github_webhook(
+    request: Request,
+    session: DatabaseSession,
+    background_tasks: BackgroundTasks,
+    x_hub_signature_256: str | None = Header(default=None),
+    x_github_event: str | None = Header(default=None),
+) -> dict[str, object]:
+    """Ingest a push without waiting for the next poll.
+
+    Not behind `require_api_key`, and that is not an omission: GitHub cannot send that header, so
+    the HMAC signature is the whole gate. The body is read as raw bytes because the digest covers
+    exactly what was sent, and re-serialising parsed JSON would change whitespace and key order.
+
+    Returns 202 before doing the work. GitHub abandons a delivery after 10 seconds, and fetching
+    several commits and embedding them will exceed that; a timeout would be recorded as a failed
+    delivery even though the ingest succeeded.
+
+    An event this endpoint does not act on is accepted rather than refused. Answering 404 for an
+    unknown repository would turn the endpoint into a probe for which repositories are indexed.
+    """
+    secret = settings.github_webhook_secret
+    if not secret:
+        raise HTTPException(status_code=503, detail="GitHub webhooks are not configured.")
+
+    body = await request.body()
+    if not verify_github_signature(secret, body, x_hub_signature_256):
+        raise HTTPException(status_code=401, detail="Invalid signature.")
+
+    # A ping is what the GitHub UI sends when the hook is created; answering it is how the setup
+    # screen goes green.
+    if x_github_event == "ping":
+        return {"status": "pong"}
+    if x_github_event != "push":
+        return {"status": "ignored", "reason": f"event {x_github_event!r} is not handled"}
+
+    try:
+        payload = json.loads(body)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Body is not valid JSON.") from None
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=400, detail="Body is not a JSON object.")
+
+    repository = payload.get("repository")
+    full_name = repository.get("full_name") if isinstance(repository, dict) else None
+    if not isinstance(full_name, str) or not full_name:
+        return {"status": "ignored", "reason": "payload names no repository"}
+
+    project = await project_for_repo(session, full_name)
+    if project is None:
+        return {"status": "ignored", "reason": "no project indexes this repository"}
+
+    shas = commit_shas(payload)
+    if not shas:
+        return {"status": "ignored", "reason": "push carried no commits"}
+
+    background_tasks.add_task(handle_push, project.id, project.repo, shas)
+    return {"status": "accepted", "project_id": project.id, "commits": len(shas)}
 
 
 @router.post("/projects/{project_id}/sync/github", dependencies=[Depends(require_api_key)])

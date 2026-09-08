@@ -60,6 +60,33 @@ def _rate_limit_reset(response: httpx.Response) -> datetime | None:
     return datetime.fromtimestamp(reset_epoch, tz=UTC)
 
 
+def _raise_for_rate_limit(response: httpx.Response) -> tuple[int | None, datetime | None]:
+    """Read the rate-limit headers, raising when the response is a throttle rather than an answer.
+
+    Shared by every endpoint on this connector. GitHub signals exhaustion as a 403 with a zero
+    remaining count as often as a 429, and telling those apart from a genuine permission error is
+    the fiddly part: a second copy of this logic would be a second chance to get it wrong.
+    """
+    remaining = _integer_header(response, "x-ratelimit-remaining")
+    reset_at = _rate_limit_reset(response)
+    retry_after = _integer_header(response, "retry-after")
+    message = ""
+    if response.status_code in {403, 429}:
+        try:
+            message = str(response.json().get("message") or "").casefold()
+        except (ValueError, AttributeError):
+            pass
+    rate_limited = response.status_code == 429 or (
+        response.status_code == 403
+        and (remaining == 0 or retry_after is not None or "rate limit" in message)
+    )
+    if rate_limited:
+        if reset_at is None and retry_after is not None:
+            reset_at = datetime.now(UTC) + timedelta(seconds=retry_after)
+        raise GitHubRateLimitError(reset_at, retry_after)
+    return remaining, reset_at
+
+
 def _parse_commit(item: dict[str, object]) -> GitHubCommit:
     commit = item["commit"]
     if not isinstance(commit, dict):
@@ -131,23 +158,7 @@ class GitHubConnector:
                     params=params if pages_fetched == 0 else None,
                     headers=self._headers(),
                 )
-                remaining = _integer_header(response, "x-ratelimit-remaining")
-                reset_at = _rate_limit_reset(response)
-                retry_after = _integer_header(response, "retry-after")
-                message = ""
-                if response.status_code in {403, 429}:
-                    try:
-                        message = str(response.json().get("message") or "").casefold()
-                    except (ValueError, AttributeError):
-                        pass
-                rate_limited = response.status_code == 429 or (
-                    response.status_code == 403
-                    and (remaining == 0 or retry_after is not None or "rate limit" in message)
-                )
-                if rate_limited:
-                    if reset_at is None and retry_after is not None:
-                        reset_at = datetime.now(UTC) + timedelta(seconds=retry_after)
-                    raise GitHubRateLimitError(reset_at, retry_after)
+                remaining, reset_at = _raise_for_rate_limit(response)
                 response.raise_for_status()
                 payload = response.json()
                 if not isinstance(payload, list):
@@ -167,3 +178,22 @@ class GitHubConnector:
     async def latest_commits(self, repo: str, limit: int = 5) -> list[GitHubCommit]:
         result = await self.list_commits(repo, max_commits=max(1, min(limit, 100)), max_pages=1)
         return result.commits
+
+    async def get_commit(self, repo: str, sha: str) -> GitHubCommit:
+        """Fetch one commit by sha, for the webhook path.
+
+        Deliberately not expressed as a `list_commits` call with a filter. `since` on the list
+        endpoint reads the *author* date, so a rebased or backdated commit sits outside the cursor
+        and no poll will ever return it. Addressing the commit directly is the whole reason the
+        webhook closes that gap rather than merely narrowing it.
+        """
+        async with httpx.AsyncClient(timeout=self.timeout_seconds, follow_redirects=True) as client:
+            response = await client.get(
+                f"{self.base_url}/repos/{repo}/commits/{sha}", headers=self._headers()
+            )
+            _raise_for_rate_limit(response)
+            response.raise_for_status()
+            payload = response.json()
+        if not isinstance(payload, dict):
+            raise ValueError("GitHub returned an invalid commit response.")
+        return _parse_commit(payload)

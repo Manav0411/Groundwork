@@ -106,6 +106,9 @@ class Settings(BaseSettings):
     github_sync_running_timeout_minutes: int = Field(
         default=15, alias="GITHUB_SYNC_RUNNING_TIMEOUT_MINUTES"
     )
+    # Unset disables the webhook endpoint rather than leaving it open. Polling remains the
+    # reconciliation path either way, so a deployment without a secret loses freshness, not data.
+    github_webhook_secret: str | None = Field(default=None, alias="GITHUB_WEBHOOK_SECRET")
     jira_site_url: str | None = Field(default=None, alias="JIRA_SITE_URL")
     jira_cloud_id: str | None = Field(default=None, alias="JIRA_CLOUD_ID")
     jira_project_key: str | None = Field(default=None, alias="JIRA_PROJECT_KEY")
