@@ -293,10 +293,13 @@ unchanged content keeps its chunks and its embeddings.
 
 Kept deliberately, with reasons, rather than quietly omitted:
 
-- **Webhooks for GitHub only.** A push is ingested by sha the moment it arrives, which closes the
-  blind spot polling has: GitHub's `since` filters on author date, so a rebased or backdated commit
-  never appears in a poll at all. Jira and Slack still poll, and polling remains the reconciliation
-  path for GitHub too, because a delivery sent while the instance is stopped is not retried.
+- **Webhooks for GitHub only.** A push is ingested by sha the moment it arrives, which closes a
+  blind spot measured on the live repository: `GET /commits?since=` walks history from the tip and
+  stops at the first commit older than the cursor, so a single backdated commit at the tip returns
+  **zero** commits and hides every newer commit behind it, while the sync still reports success.
+  Jira and Slack still poll, and polling remains the reconciliation path for GitHub too, because a
+  delivery sent while the instance is stopped is not retried. Measured in
+  `backend/evals/baselines/webhook_delivery_2026-09-08.md`.
 - **Entailment is judged per claim span, not per sentence** — see Answer integrity above.
 - **One unanswerable question is accepted** by the grader, because the corpus grew Slack timing
   metrics that superficially resemble the figure asked for.
